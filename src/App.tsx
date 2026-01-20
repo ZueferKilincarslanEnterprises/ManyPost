@@ -5,6 +5,7 @@ import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Dashboard from './pages/Dashboard';
 import Integrations from './pages/Integrations';
+import OAuthCallback from './pages/OAuthCallback';
 import Videos from './pages/Videos';
 import Schedule from './pages/Schedule';
 import ScheduledPosts from './pages/ScheduledPosts';
@@ -18,6 +19,14 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route
+            path="/youtube-oauth"
+            element={
+              <ProtectedRoute>
+                <OAuthCallback />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/dashboard"
             element={

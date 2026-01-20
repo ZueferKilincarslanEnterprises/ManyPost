@@ -67,8 +67,31 @@ export default function Integrations() {
     }
   };
 
-  const connectYouTube = () => {
-    alert('YouTube OAuth integration will be implemented with Edge Functions');
+  const connectYouTube = async () => {
+    if (!user) return;
+
+    try {
+      const token = await supabase.auth.getSession().then(({ data }) => data.session?.access_token);
+      if (!token) throw new Error('No authentication token');
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/youtube-oauth?action=init`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      const { authUrl, error } = await response.json();
+      if (error) throw new Error(error);
+
+      window.location.href = authUrl;
+    } catch (error) {
+      console.error('Error initiating YouTube OAuth:', error);
+      alert('Failed to connect YouTube account');
+    }
   };
 
   return (

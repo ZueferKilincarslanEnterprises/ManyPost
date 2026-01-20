@@ -43,7 +43,8 @@ Deno.serve(async (req: Request) => {
 
     if (action === 'init') {
       const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
-      const redirectUri = `${url.origin}/youtube-oauth?action=callback`;
+      const frontendUrl = Deno.env.get('FRONTEND_URL') || 'http://localhost:5173';
+      const redirectUri = `${frontendUrl}/youtube-oauth`;
 
       const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
         `client_id=${clientId}&` +
@@ -71,7 +72,8 @@ Deno.serve(async (req: Request) => {
 
       const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
       const clientSecret = Deno.env.get('YOUTUBE_CLIENT_SECRET');
-      const redirectUri = `${url.origin}/youtube-oauth?action=callback`;
+      const frontendUrl = Deno.env.get('FRONTEND_URL') || 'http://localhost:5173';
+      const redirectUri = `${frontendUrl}/youtube-oauth`;
 
       const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
