@@ -82,14 +82,11 @@ export default function Integrations() {
     if (!user) return;
 
     try {
-      const token = await supabase.auth.getSession().then(({ data }) => data.session?.access_token);
-      if (!token) throw new Error('No authentication token');
-
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/youtube-oauth?action=init`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/youtube-oauth?action=init&user_id=${user.id}`,
         {
+          method: 'GET',
           headers: {
-            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
         }

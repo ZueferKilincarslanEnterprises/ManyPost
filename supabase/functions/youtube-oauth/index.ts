@@ -106,26 +106,18 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      throw new Error('Missing authorization header');
-    }
-
-    const { data: { user }, error: userError } = await supabase.auth.getUser(
-      authHeader.replace('Bearer ', '')
-    );
-
-    if (userError || !user) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        {
-          status: 401,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
-
     if (action === 'init') {
+      const userId = url.searchParams.get('user_id');
+      if (!userId) {
+        return new Response(
+          JSON.stringify({ error: 'Missing user_id' }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
       const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
       const redirectUri = `${supabaseUrl}/functions/v1/youtube-oauth`;
 
@@ -135,7 +127,7 @@ Deno.serve(async (req: Request) => {
         `response_type=code&` +
         `scope=${encodeURIComponent('https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube')}&` +
         `access_type=offline&` +
-        `state=${user.id}`;
+        `state=${userId}`;
 
       return new Response(
         JSON.stringify({ authUrl }),
