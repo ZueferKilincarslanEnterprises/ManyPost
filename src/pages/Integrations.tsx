@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Integration } from '../types';
-import { Plus, Youtube, Instagram, Music, Trash2, AlertCircle } from 'lucide-react';
+import { Plus, Youtube, Instagram, Music, Trash2, AlertCircle, CheckCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 
 export default function Integrations() {
@@ -10,8 +10,19 @@ export default function Integrations() {
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const success = params.get('success');
+    const channel = params.get('channel');
+
+    if (success === 'youtube' && channel) {
+      setSuccessMessage(`Successfully connected YouTube: ${channel}`);
+      window.history.replaceState({}, '', '/integrations');
+      setTimeout(() => setSuccessMessage(''), 5000);
+    }
+
     loadIntegrations();
   }, [user]);
 
@@ -110,6 +121,13 @@ export default function Integrations() {
             Add Account
           </button>
         </div>
+
+        {successMessage && (
+          <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
+            <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+            <p className="text-green-800">{successMessage}</p>
+          </div>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center py-12">

@@ -43,8 +43,7 @@ Deno.serve(async (req: Request) => {
 
     if (action === 'init') {
       const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
-      const frontendUrl = Deno.env.get('FRONTEND_URL') || 'http://localhost:5173';
-      const redirectUri = `${frontendUrl}/youtube-oauth`;
+      const redirectUri = `${supabaseUrl}/functions/v1/youtube-oauth`;
 
       const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
         `client_id=${clientId}&` +
@@ -66,14 +65,13 @@ Deno.serve(async (req: Request) => {
       const code = url.searchParams.get('code');
       const state = url.searchParams.get('state');
 
-      if (!code || state !== user.id) {
-        throw new Error('Invalid OAuth callback');
+      if (!code || !state) {
+        throw new Error('Missing code or state');
       }
 
       const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
       const clientSecret = Deno.env.get('YOUTUBE_CLIENT_SECRET');
-      const frontendUrl = Deno.env.get('FRONTEND_URL') || 'http://localhost:5173';
-      const redirectUri = `${frontendUrl}/youtube-oauth`;
+      const redirectUri = `${supabaseUrl}/functions/v1/youtube-oauth`;
 
       const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
@@ -112,7 +110,7 @@ Deno.serve(async (req: Request) => {
       const { error: insertError } = await supabase
         .from('integrations')
         .insert({
-          user_id: user.id,
+          user_id: state,
           platform: 'youtube',
           platform_user_id: channel.id,
           channel_name: channel.snippet.title,
@@ -126,18 +124,13 @@ Deno.serve(async (req: Request) => {
 
       if (insertError) throw insertError;
 
-      return new Response(
-        JSON.stringify({
-          success: true,
-          channel: {
-            name: channel.snippet.title,
-            id: channel.id
-          }
-        }),
-        {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
+      const frontendUrl = Deno.env.get('FRONTEND_URL') || 'http://localhost:5173';
+      return new Response(null, {
+        status: 302,
+        headers: {
+          'Location': `${frontendUrl}/integrations?success=youtube&channel=${encodeURIComponent(channel.snippet.title)}`,
+        },
+      });
     }
 
     return new Response(
