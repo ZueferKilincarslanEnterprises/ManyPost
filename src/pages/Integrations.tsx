@@ -95,13 +95,19 @@ export default function Integrations() {
         }
       );
 
-      const { authUrl, error } = await response.json();
-      if (error) throw new Error(error);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
-      window.location.href = authUrl;
+      const data = await response.json();
+
+      if (data.error) throw new Error(data.error);
+      if (!data.authUrl) throw new Error('No auth URL received from server');
+
+      window.location.href = data.authUrl;
     } catch (error) {
       console.error('Error initiating YouTube OAuth:', error);
-      alert('Failed to connect YouTube account');
+      alert(`Failed to connect YouTube account: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
