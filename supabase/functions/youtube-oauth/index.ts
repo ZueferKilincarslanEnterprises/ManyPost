@@ -44,7 +44,8 @@ Deno.serve(async (req: Request) => {
       const tokens = await tokenResponse.json();
 
       if (!tokens.access_token) {
-        const frontendUrl = Deno.env.get('FRONTEND_URL') || 'http://localhost:5173';
+        const envUrl = Deno.env.get('FRONTEND_URL');
+        const frontendUrl = (envUrl && envUrl !== 'undefined') ? envUrl : 'http://localhost:5173';
         return new Response(null, {
           status: 302,
           headers: {
@@ -64,7 +65,8 @@ Deno.serve(async (req: Request) => {
       const channel = channelData.items?.[0];
 
       if (!channel) {
-        const frontendUrl = Deno.env.get('FRONTEND_URL') || 'http://localhost:5173';
+        const envUrl = Deno.env.get('FRONTEND_URL');
+        const frontendUrl = (envUrl && envUrl !== 'undefined') ? envUrl : 'http://localhost:5173';
         return new Response(null, {
           status: 302,
           headers: {
@@ -94,7 +96,8 @@ Deno.serve(async (req: Request) => {
         console.error('Insert error:', insertError);
       }
 
-      const frontendUrl = Deno.env.get('FRONTEND_URL') || 'http://localhost:5173';
+      const envUrl = Deno.env.get('FRONTEND_URL');
+      const frontendUrl = (envUrl && envUrl !== 'undefined') ? envUrl : 'http://localhost:5173';
       return new Response(null, {
         status: 302,
         headers: {
