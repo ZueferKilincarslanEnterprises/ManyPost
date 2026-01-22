@@ -2,15 +2,18 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { ApiKey, Integration, ScheduledPost } from '../types';
-import { Copy, RefreshCw, Check, Link as LinkIcon, Calendar, History } from 'lucide-react';
+import { Copy, RefreshCw, Check, Link as LinkIcon, Calendar, History, Plus, Trash2, Eye, EyeOff } from 'lucide-react';
 import Layout from '../components/Layout';
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const [apiKey, setApiKey] = useState<ApiKey | null>(null);
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [regenerating, setRegenerating] = useState(false);
+  const [creatingKey, setCreatingKey] = useState(false);
+  const [keyName, setKeyName] = useState('');
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [visibleKeys, setVisibleKeys] = useState<{ [key: string]: boolean }>({});
   const [stats, setStats] = useState({
     integrations: 0,
     scheduled: 0,
@@ -26,15 +29,15 @@ export default function Dashboard() {
 
     setLoading(true);
     try {
-      const [apiKeyRes, integrationsRes, scheduledRes, historyRes] = await Promise.all([
-        supabase.from('api_keys').select('*').eq('user_id', user.id).eq('is_active', true).maybeSingle(),
+      const [apiKeysRes, integrationsRes, scheduledRes, historyRes] = await Promise.all([
+        supabase.from('api_keys').select('*').eq('user_id', user.id).eq('is_active', true),
         supabase.from('integrations').select('id').eq('user_id', user.id).eq('is_active', true),
         supabase.from('scheduled_posts').select('id').eq('user_id', user.id).eq('status', 'pending'),
         supabase.from('post_history').select('id').eq('user_id', user.id),
       ]);
 
-      if (apiKeyRes.data) {
-        setApiKey(apiKeyRes.data);
+      if (apiKeysRes.data) {
+        setApiKeys(apiKeysRes.data);
       }
 
       setStats({
@@ -49,25 +52,18 @@ export default function Dashboard() {
     }
   };
 
-  const copyToClipboard = () => {
-    if (apiKey) {
-      navigator.clipboard.writeText(apiKey.key);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
+  const copyToClipboard = (key: string) => {
+    navigator.clipboard.writeText(key);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
-  const regenerateApiKey = async () => {
-    if (!user || !confirm('Are you sure you want to regenerate your API key? The old key will stop working.')) {
-      return;
-    }
+  const createNewKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !keyName.trim()) return;
 
-    setRegenerating(true);
+    setCreatingKey(true);
     try {
-      if (apiKey) {
-        await supabase.from('api_keys').update({ is_active: false }).eq('id', apiKey.id);
-      }
-
       const newKey = 'mp_' + Array.from(crypto.getRandomValues(new Uint8Array(32)))
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
@@ -77,18 +73,33 @@ export default function Dashboard() {
         .insert({
           user_id: user.id,
           key: newKey,
+          name: keyName,
           is_active: true,
         })
         .select()
         .single();
 
       if (error) throw error;
-      setApiKey(data);
+      setApiKeys([...apiKeys, data]);
+      setKeyName('');
+      setShowCreateForm(false);
     } catch (error) {
-      console.error('Error regenerating API key:', error);
-      alert('Failed to regenerate API key');
+      console.error('Error creating API key:', error);
+      alert('Failed to create API key');
     } finally {
-      setRegenerating(false);
+      setCreatingKey(false);
+    }
+  };
+
+  const deleteKey = async (keyId: string) => {
+    if (!confirm('Delete this API key?')) return;
+
+    try {
+      await supabase.from('api_keys').update({ is_active: false }).eq('id', keyId);
+      setApiKeys(apiKeys.filter(k => k.id !== keyId));
+    } catch (error) {
+      console.error('Error deleting API key:', error);
+      alert('Failed to delete API key');
     }
   };
 
@@ -143,40 +154,98 @@ export default function Dashboard() {
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <h2 className="text-xl font-bold text-slate-900 mb-4">Your API Key</h2>
-          <p className="text-slate-600 mb-4">
-            Use this key to access the ManyPost API programmatically.
-          </p>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">API Keys</h2>
+              <p className="text-slate-600 text-sm mt-1">Manage your API keys for programmatic access.</p>
+            </div>
+            <button
+              onClick={() => setShowCreateForm(!showCreateForm)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
+            >
+              <Plus className="w-4 h-4" />
+              Create Key
+            </button>
+          </div>
 
-          {apiKey ? (
-            <div className="space-y-4">
-              <div className="flex gap-2">
+          {showCreateForm && (
+            <form onSubmit={createNewKey} className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-slate-700 mb-2">Key Name</label>
                 <input
                   type="text"
-                  readOnly
-                  value={apiKey.key}
-                  className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg font-mono text-sm"
+                  value={keyName}
+                  onChange={(e) => setKeyName(e.target.value)}
+                  placeholder="e.g., Production, Testing"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  required
                 />
+              </div>
+              <div className="flex gap-2">
                 <button
-                  onClick={copyToClipboard}
-                  className="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition flex items-center gap-2"
+                  type="submit"
+                  disabled={creatingKey}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition disabled:opacity-50"
                 >
-                  {copied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
-                  {copied ? 'Copied!' : 'Copy'}
+                  {creatingKey ? 'Creating...' : 'Create'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCreateForm(false);
+                    setKeyName('');
+                  }}
+                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg transition"
+                >
+                  Cancel
                 </button>
               </div>
+            </form>
+          )}
 
-              <button
-                onClick={regenerateApiKey}
-                disabled={regenerating}
-                className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50"
-              >
-                <RefreshCw className={`w-4 h-4 ${regenerating ? 'animate-spin' : ''}`} />
-                {regenerating ? 'Regenerating...' : 'Regenerate API Key'}
-              </button>
+          {apiKeys.length > 0 ? (
+            <div className="space-y-3">
+              {apiKeys.map((apiKey) => (
+                <div key={apiKey.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <h3 className="font-medium text-slate-900">{apiKey.name}</h3>
+                      <p className="text-xs text-slate-500">
+                        Created {new Date(apiKey.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => deleteKey(apiKey.id)}
+                      className="p-2 text-red-600 hover:bg-red-50 rounded transition"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type={visibleKeys[apiKey.id] ? 'text' : 'password'}
+                      readOnly
+                      value={apiKey.key}
+                      className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded font-mono text-xs"
+                    />
+                    <button
+                      onClick={() => setVisibleKeys({ ...visibleKeys, [apiKey.id]: !visibleKeys[apiKey.id] })}
+                      className="px-3 py-2 text-slate-600 hover:bg-slate-200 rounded transition"
+                    >
+                      {visibleKeys[apiKey.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                    <button
+                      onClick={() => copyToClipboard(apiKey.key)}
+                      className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded transition flex items-center gap-1"
+                    >
+                      {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
-            <p className="text-slate-500">No API key found. Please contact support.</p>
+            <p className="text-slate-500 text-center py-8">No API keys yet. Create one to get started.</p>
           )}
         </div>
       </div>
