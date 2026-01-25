@@ -41,6 +41,51 @@ export default function Videos() {
 
     setUploading(true);
     try {
+      // 1. Get a signed URL from the Edge Function
+      const token = await supabase.auth.getSession().then(({ data }) => data.session?.access_token);
+      if (!token) throw new Error('No authentication token');
+
+      const signedUrlResponse = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-r2-signed-url`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            fileName: file.name,
+            contentType: file.type,
+          }),
+        }
+      );
+
+      if (!signedUrlResponse.ok) {
+        const errorData = await signedUrlResponse.json();
+        throw new Error(errorData.error || 'Failed to get signed URL for R2 upload');
+      }
+
+      const { signedUrl, r2Key } = await signedUrlResponse.json();
+
+      // 2. Upload the file directly to R2 using the signed URL
+      const r2UploadResponse = await fetch(signedUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': file.type,
+        },
+        body: file,
+      });
+
+      if (!r2UploadResponse.ok) {
+        throw new Error('Failed to upload video to Cloudflare R2');
+      }
+
+      // Construct the public R2 URL
+      const R2_ACCOUNT_ID = import.meta.env.VITE_R2_ACCOUNT_ID;
+      const R2_BUCKET_NAME = import.meta.env.VITE_R2_BUCKET_NAME;
+      const r2PublicUrl = `https://pub-${R2_ACCOUNT_ID}.r2.dev/${R2_BUCKET_NAME}/${r2Key}`;
+
+      // 3. Insert metadata into Supabase, including R2 details
       const { data, error } = await supabase
         .from('videos')
         .insert({
@@ -48,6 +93,8 @@ export default function Videos() {
           file_name: file.name,
           file_size: file.size,
           mime_type: file.type,
+          r2_url: r2PublicUrl, // Store the public URL
+          r2_key: r2Key,       // Store the R2 key for future reference/deletion
           upload_status: 'completed',
           uploaded_at: new Date().toISOString(),
         })
@@ -56,10 +103,10 @@ export default function Videos() {
 
       if (error) throw error;
       loadVideos();
-      alert('Video uploaded successfully! (Note: R2 integration to be implemented)');
+      alert('Video erfolgreich hochgeladen!');
     } catch (error) {
-      console.error('Error uploading video:', error);
-      alert('Failed to upload video');
+      console.error('Fehler beim Hochladen des Videos:', error);
+      alert(`Fehler beim Hochladen des Videos: ${error instanceof Error ? error.message : 'Unbekannter Fehler'}`);
     } finally {
       setUploading(false);
     }
@@ -71,6 +118,7 @@ export default function Videos() {
     }
 
     try {
+      // TODO: Implement R2 deletion here using another Edge Function
       const { error } = await supabase
         .from('videos')
         .delete()
