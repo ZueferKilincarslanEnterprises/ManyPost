@@ -25,6 +25,7 @@ Deno.serve(async (req: Request) => {
     const state = url.searchParams.get('state');
 
     if (code && state) {
+      console.log(`[youtube-oauth] Handling callback for state: ${state}`);
       const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
       const clientSecret = Deno.env.get('YOUTUBE_CLIENT_SECRET');
       const redirectUri = `${supabaseUrl}/functions/v1/youtube-oauth`;
@@ -44,6 +45,7 @@ Deno.serve(async (req: Request) => {
       const tokens = await tokenResponse.json();
 
       if (!tokens.access_token) {
+        console.error('[youtube-oauth] Failed to get tokens:', tokens);
         const envUrl = Deno.env.get('FRONTEND_URL');
         const frontendUrl = (envUrl && envUrl !== 'undefined') ? envUrl : 'http://localhost:5173';
         return new Response(null, {
@@ -65,6 +67,7 @@ Deno.serve(async (req: Request) => {
       const channel = channelData.items?.[0];
 
       if (!channel) {
+        console.error('[youtube-oauth] No YouTube channel found for this account');
         const envUrl = Deno.env.get('FRONTEND_URL');
         const frontendUrl = (envUrl && envUrl !== 'undefined') ? envUrl : 'http://localhost:5173';
         return new Response(null, {
@@ -77,9 +80,10 @@ Deno.serve(async (req: Request) => {
 
       const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
 
-      const { error: insertError } = await supabase
+      // Upsert integration to avoid duplicates and update tokens
+      const { error: upsertError } = await supabase
         .from('integrations')
-        .insert({
+        .upsert({
           user_id: state,
           platform: 'youtube',
           platform_user_id: channel.id,
@@ -87,13 +91,16 @@ Deno.serve(async (req: Request) => {
           channel_id: channel.id,
           profile_image_url: channel.snippet.thumbnails?.default?.url,
           access_token: tokens.access_token,
-          refresh_token: tokens.refresh_token,
+          refresh_token: tokens.refresh_token, // Will now always be present due to prompt=consent
           token_expires_at: expiresAt,
           is_active: true,
+          last_synced_at: new Date().toISOString(),
+        }, {
+          onConflict: 'user_id,platform_user_id'
         });
 
-      if (insertError) {
-        console.error('Insert error:', insertError);
+      if (upsertError) {
+        console.error('[youtube-oauth] Database upsert error:', upsertError);
       }
 
       const envUrl = Deno.env.get('FRONTEND_URL');
@@ -121,12 +128,14 @@ Deno.serve(async (req: Request) => {
       const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
       const redirectUri = `${supabaseUrl}/functions/v1/youtube-oauth`;
 
+      // Added prompt=consent to ensure a refresh_token is always returned
       const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
         `client_id=${clientId}&` +
         `redirect_uri=${encodeURIComponent(redirectUri)}&` +
         `response_type=code&` +
         `scope=${encodeURIComponent('https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube')}&` +
         `access_type=offline&` +
+        `prompt=consent&` +
         `state=${userId}`;
 
       return new Response(
@@ -146,7 +155,7 @@ Deno.serve(async (req: Request) => {
     );
 
   } catch (error) {
-    console.error('YouTube OAuth Error:', error);
+    console.error('[youtube-oauth] Fatal Error:', error);
     return new Response(
       JSON.stringify({ error: error.message || 'Internal server error' }),
       {
