@@ -8,10 +8,7 @@ const corsHeaders = {
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 200,
-      headers: corsHeaders,
-    });
+    return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   try {
@@ -24,8 +21,14 @@ Deno.serve(async (req: Request) => {
     const code = url.searchParams.get('code');
     const state = url.searchParams.get('state');
 
+    // Ermittle die Frontend URL aus Secrets oder Fallback
+    const envUrl = Deno.env.get('FRONTEND_URL');
+    const frontendUrl = (envUrl && envUrl !== 'undefined') ? envUrl.replace(/\/$/, '') : 'http://localhost:5173';
+
+    // 1. CALLBACK HANDLING (Von Google oder vom Frontend)
     if (code && state) {
-      console.log(`[youtube-oauth] Handling callback for state: ${state}`);
+      console.log(`[youtube-oauth] Processing callback for user: ${state}`);
+      
       const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
       const clientSecret = Deno.env.get('YOUTUBE_CLIENT_SECRET');
       const redirectUri = `${supabaseUrl}/functions/v1/youtube-oauth`;
@@ -45,90 +48,73 @@ Deno.serve(async (req: Request) => {
       const tokens = await tokenResponse.json();
 
       if (!tokens.access_token) {
-        console.error('[youtube-oauth] Failed to get tokens:', tokens);
-        const envUrl = Deno.env.get('FRONTEND_URL');
-        const frontendUrl = (envUrl && envUrl !== 'undefined') ? envUrl : 'http://localhost:5173';
+        console.error('[youtube-oauth] Token error:', tokens);
+        if (action === 'callback') { // Aufruf vom Frontend per fetch
+          return new Response(JSON.stringify({ error: tokens.error_description || 'Token exchange failed' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        // Direkter Browser-Redirect von Google
         return new Response(null, {
-          status: 302,
-          headers: {
-            'Location': `${frontendUrl}/integrations?error=${encodeURIComponent(tokens.error || 'token_failed')}`,
-          },
+          status: 302, headers: { 'Location': `${frontendUrl}/integrations?error=token_failed` }
         });
       }
 
-      const channelResponse = await fetch(
-        'https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true',
-        {
-          headers: { Authorization: `Bearer ${tokens.access_token}` },
-        }
-      );
-
+      // Channel Daten abrufen
+      const channelResponse = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', {
+        headers: { Authorization: `Bearer ${tokens.access_token}` },
+      });
       const channelData = await channelResponse.json();
       const channel = channelData.items?.[0];
 
       if (!channel) {
-        console.error('[youtube-oauth] No YouTube channel found for this account');
-        const envUrl = Deno.env.get('FRONTEND_URL');
-        const frontendUrl = (envUrl && envUrl !== 'undefined') ? envUrl : 'http://localhost:5173';
+        if (action === 'callback') {
+          return new Response(JSON.stringify({ error: 'No YouTube channel found' }), {
+            status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
         return new Response(null, {
-          status: 302,
-          headers: {
-            'Location': `${frontendUrl}/integrations?error=no_channel`,
-          },
+          status: 302, headers: { 'Location': `${frontendUrl}/integrations?error=no_channel` }
         });
       }
 
+      // In Datenbank speichern
       const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
+      await supabase.from('integrations').upsert({
+        user_id: state,
+        platform: 'youtube',
+        platform_user_id: channel.id,
+        channel_name: channel.snippet.title,
+        channel_id: channel.id,
+        profile_image_url: channel.snippet.thumbnails?.default?.url,
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        token_expires_at: expiresAt,
+        is_active: true,
+        last_synced_at: new Date().toISOString(),
+      }, { onConflict: 'user_id,platform_user_id' });
 
-      // Upsert integration to avoid duplicates and update tokens
-      const { error: upsertError } = await supabase
-        .from('integrations')
-        .upsert({
-          user_id: state,
-          platform: 'youtube',
-          platform_user_id: channel.id,
-          channel_name: channel.snippet.title,
-          channel_id: channel.id,
-          profile_image_url: channel.snippet.thumbnails?.default?.url,
-          access_token: tokens.access_token,
-          refresh_token: tokens.refresh_token, // Will now always be present due to prompt=consent
-          token_expires_at: expiresAt,
-          is_active: true,
-          last_synced_at: new Date().toISOString(),
-        }, {
-          onConflict: 'user_id,platform_user_id'
+      // Antwort-Logik
+      if (action === 'callback') {
+        return new Response(JSON.stringify({ success: true, channel: { name: channel.snippet.title } }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
-
-      if (upsertError) {
-        console.error('[youtube-oauth] Database upsert error:', upsertError);
       }
-
-      const envUrl = Deno.env.get('FRONTEND_URL');
-      const frontendUrl = (envUrl && envUrl !== 'undefined') ? envUrl : 'http://localhost:5173';
+      
       return new Response(null, {
         status: 302,
-        headers: {
-          'Location': `${frontendUrl}/integrations?success=youtube&channel=${encodeURIComponent(channel.snippet.title)}`,
-        },
+        headers: { 'Location': `${frontendUrl}/integrations?success=youtube&channel=${encodeURIComponent(channel.snippet.title)}` }
       });
     }
 
+    // 2. INIT HANDLING
     if (action === 'init') {
       const userId = url.searchParams.get('user_id');
-      if (!userId) {
-        return new Response(
-          JSON.stringify({ error: 'Missing user_id' }),
-          {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
-        );
-      }
+      if (!userId) throw new Error('Missing user_id');
 
       const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
       const redirectUri = `${supabaseUrl}/functions/v1/youtube-oauth`;
 
-      // Added prompt=consent to ensure a refresh_token is always returned
       const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
         `client_id=${clientId}&` +
         `redirect_uri=${encodeURIComponent(redirectUri)}&` +
@@ -138,30 +124,19 @@ Deno.serve(async (req: Request) => {
         `prompt=consent&` +
         `state=${userId}`;
 
-      return new Response(
-        JSON.stringify({ authUrl }),
-        {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
+      return new Response(JSON.stringify({ authUrl }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
-    return new Response(
-      JSON.stringify({ error: 'Invalid request' }),
-      {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    );
+    return new Response(JSON.stringify({ error: 'Invalid request' }), {
+      status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
 
   } catch (error) {
-    console.error('[youtube-oauth] Fatal Error:', error);
-    return new Response(
-      JSON.stringify({ error: error.message || 'Internal server error' }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    );
+    console.error('[youtube-oauth] Error:', error);
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
   }
 });
