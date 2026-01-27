@@ -8,37 +8,35 @@ const corsHeaders = {
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 200,
-      headers: corsHeaders,
-    });
+    return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   try {
+    console.log("[cron-publisher] Checking for due posts...");
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const now = new Date();
-    const fiveMinutesFromNow = new Date(now.getTime() + 5 * 60 * 1000);
+    const now = new Date().toISOString();
 
+    // Find all pending posts that should have been posted by now
     const { data: duePosts, error: queryError } = await supabase
       .from('scheduled_posts')
-      .select('id, scheduled_time')
+      .select('id')
       .eq('status', 'pending')
-      .lte('scheduled_time', fiveMinutesFromNow.toISOString())
-      .gte('scheduled_time', now.toISOString());
+      .lte('scheduled_time', now);
 
-    if (queryError) {
-      throw queryError;
-    }
+    if (queryError) throw queryError;
+
+    console.log(`[cron-publisher] Found ${duePosts?.length || 0} due posts.`);
 
     const results = [];
-
     for (const post of duePosts || []) {
       try {
+        // Trigger the publisher for each post
+        // We use the internal URL for function-to-function communication
         const publisherUrl = `${supabaseUrl}/functions/v1/youtube-publisher`;
-
+        
         const response = await fetch(publisherUrl, {
           method: 'POST',
           headers: {
@@ -49,40 +47,22 @@ Deno.serve(async (req: Request) => {
         });
 
         const result = await response.json();
-
-        results.push({
-          post_id: post.id,
-          success: response.ok,
-          result: result,
-        });
+        results.push({ post_id: post.id, success: response.ok, result });
       } catch (error) {
-        results.push({
-          post_id: post.id,
-          success: false,
-          error: error.message,
-        });
+        console.error(`[cron-publisher] Error processing post ${post.id}:`, error);
+        results.push({ post_id: post.id, success: false, error: error.message });
       }
     }
 
     return new Response(
-      JSON.stringify({
-        success: true,
-        processed: results.length,
-        results: results,
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
+      JSON.stringify({ success: true, processed: results.length, results }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
-
   } catch (error) {
-    console.error('Cron Publisher Error:', error);
+    console.error('[cron-publisher] Fatal error:', error);
     return new Response(
-      JSON.stringify({ error: error.message || 'Internal server error' }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
+      JSON.stringify({ error: error.message }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 });
