@@ -136,19 +136,22 @@ export default function Videos() {
     }
 
     try {
-      // 1. Delete the video from Cloudflare R2
-      const supabaseServiceKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
-      
+      // 1. Get user token for authentication
+      const token = await supabase.auth.getSession().then(({ data }) => data.session?.access_token);
+      if (!token) throw new Error('No authentication token');
+
+      // 2. Delete the video from Cloudflare R2 using our Edge Function
       const r2DeleteResponse = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/delete-r2-video`,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${supabaseServiceKey}`,
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
             r2Key: r2Key,
+            videoId: id
           }),
         }
       );
@@ -156,10 +159,10 @@ export default function Videos() {
       if (!r2DeleteResponse.ok) {
         const errorData = await r2DeleteResponse.json();
         console.error('Error deleting from R2:', errorData.error);
-        throw new Error('Failed to delete video from storage');
+        throw new Error(`Failed to delete video from storage: ${errorData.error}`);
       }
 
-      // 2. Delete the video metadata from Supabase
+      // 3. Delete the video metadata from Supabase
       const { error } = await supabase
         .from('videos')
         .delete()
