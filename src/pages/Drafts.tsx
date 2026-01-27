@@ -55,6 +55,11 @@ export default function Drafts() {
     }
   };
 
+  const resumeDraft = (draft: Draft) => {
+    // Pass the draft data to the schedule page via state
+    navigate('/schedule', { state: { draft } });
+  };
+
   const getCompletionPercentage = (draft: Draft) => {
     const fields = [
       draft.integration_id,
@@ -133,7 +138,7 @@ export default function Drafts() {
                       Updated {new Date(draft.updated_at).toLocaleDateString()}
                     </span>
                     <button
-                      onClick={() => alert('Resume draft functionality to be implemented')}
+                      onClick={() => resumeDraft(draft)}
                       className="flex items-center gap-1 px-3 py-1 text-blue-600 hover:bg-blue-50 rounded-lg transition text-sm font-medium"
                     >
                       <Edit className="w-4 h-4" />
