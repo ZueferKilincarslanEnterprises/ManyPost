@@ -8,7 +8,7 @@ A complete social media scheduling platform that allows users to schedule posts 
 - User authentication with email/password
 - Dashboard with API key management
 - Multi-platform social media account connections
-- Video upload and management
+- Video upload and management with previews
 - Schedule posts with full customization
 - Post history tracking
 - Draft system for incomplete posts
@@ -71,7 +71,7 @@ The database schema is automatically created via Supabase migrations. Tables inc
 
 1. **Sign Up/Login** - Create an account or sign in
 2. **Connect YouTube** - Go to Integrations and connect your YouTube channel
-3. **Upload Videos** - Upload videos to your library
+3. **Upload Videos** - Upload videos to your library with preview generation
 4. **Schedule Posts** - Create scheduled posts with full metadata
 5. **Monitor Progress** - View scheduled posts and post history
 
@@ -104,7 +104,7 @@ const response = await fetch('https://YOUR_SUPABASE_URL/functions/v1/api/schedul
 - `/signup` - New user registration
 - `/dashboard` - Overview and API key management
 - `/integrations` - Manage connected accounts
-- `/videos` - Video library
+- `/videos` - Video library management with previews
 - `/schedule` - Create new scheduled post
 - `/scheduled` - View pending scheduled posts
 - `/history` - View published posts
@@ -115,6 +115,8 @@ const response = await fetch('https://YOUR_SUPABASE_URL/functions/v1/api/schedul
 - `youtube-oauth` - YouTube OAuth flow handler
 - `youtube-publisher` - Handles video publishing to YouTube
 - `cron-publisher` - Cron job for automatic post publishing
+- `generate-r2-signed-url` - Generates signed URLs for R2 uploads
+- `delete-r2-video` - Deletes videos from Cloudflare R2 storage
 
 ## Deployment
 
