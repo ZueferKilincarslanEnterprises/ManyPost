@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Video as VideoType } from '../types';
-import { Upload, Trash2, AlertCircle, FileVideo } from 'lucide-react';
+import { Upload, Trash2, AlertCircle, Play } from 'lucide-react';
 import Layout from '../components/Layout';
 
 export default function Videos() {
@@ -10,6 +10,7 @@ export default function Videos() {
   const [videos, setVideos] = useState<VideoType[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const videoRefs = useRef<{[key: string]: HTMLVideoElement | null}>({});
 
   useEffect(() => {
     loadVideos();
@@ -33,6 +34,23 @@ export default function Videos() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const generateThumbnail = (videoId: string) => {
+    const video = videoRefs.current[videoId];
+    if (!video) return;
+
+    // Create canvas to capture frame
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 180;
+    const ctx = canvas.getContext('2d');
+    
+    if (ctx) {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL('image/jpeg');
+    }
+    return null;
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -112,13 +130,39 @@ export default function Videos() {
     }
   };
 
-  const deleteVideo = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this video?')) {
+  const deleteVideo = async (id: string, r2Key: string) => {
+    if (!confirm('Are you sure you want to delete this video? This action cannot be undone.')) {
       return;
     }
 
     try {
-      // TODO: Implement R2 deletion here using another Edge Function
+      // 1. Get user token for authentication
+      const token = await supabase.auth.getSession().then(({ data }) => data.session?.access_token);
+      if (!token) throw new Error('No authentication token');
+
+      // 2. Delete the video from Cloudflare R2 using our Edge Function
+      const r2DeleteResponse = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/delete-r2-video`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            r2Key: r2Key,
+            videoId: id
+          }),
+        }
+      );
+
+      if (!r2DeleteResponse.ok) {
+        const errorData = await r2DeleteResponse.json();
+        console.error('Error deleting from R2:', errorData.error);
+        throw new Error(`Failed to delete video from storage: ${errorData.error}`);
+      }
+
+      // 3. Delete the video metadata from Supabase
       const { error } = await supabase
         .from('videos')
         .delete()
@@ -126,9 +170,10 @@ export default function Videos() {
 
       if (error) throw error;
       loadVideos();
+      alert('Video erfolgreich gelöscht!');
     } catch (error) {
       console.error('Error deleting video:', error);
-      alert('Failed to delete video');
+      alert(`Fehler beim Löschen des Videos: ${error instanceof Error ? error.message : 'Unbekannter Fehler'}`);
     }
   };
 
@@ -137,6 +182,13 @@ export default function Videos() {
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
     if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
     return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  };
+
+  const formatDuration = (seconds?: number) => {
+    if (!seconds) return '';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -187,11 +239,24 @@ export default function Videos() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {videos.map((video) => (
               <div key={video.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="aspect-video bg-slate-100 flex items-center justify-center">
-                  {video.thumbnail_url ? (
-                    <img src={video.thumbnail_url} alt={video.file_name} className="w-full h-full object-cover" />
+                <div className="relative aspect-video bg-slate-900 flex items-center justify-center">
+                  {video.r2_url ? (
+                    <>
+                      <video
+                        ref={(el) => (videoRefs.current[video.id] = el)}
+                        src={video.r2_url}
+                        className="w-full h-full object-cover"
+                        muted
+                        preload="metadata"
+                      />
+                      <div className="absolute inset-0 bg-black bg-opacity-30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                        <Play className="w-12 h-12 text-white" />
+                      </div>
+                    </>
                   ) : (
-                    <FileVideo className="w-16 h-16 text-slate-400" />
+                    <div className="w-full h-full bg-slate-200 flex items-center justify-center">
+                      <AlertCircle className="w-12 h-12 text-slate-400" />
+                    </div>
                   )}
                 </div>
 
@@ -202,7 +267,7 @@ export default function Videos() {
 
                   <div className="space-y-1 text-sm text-slate-600 mb-4">
                     <div>Size: {formatFileSize(video.file_size)}</div>
-                    {video.duration && <div>Duration: {Math.floor(video.duration / 60)}:{(video.duration % 60).toString().padStart(2, '0')}</div>}
+                    {video.duration && <div>Duration: {formatDuration(video.duration)}</div>}
                     <div>Uploaded: {new Date(video.uploaded_at).toLocaleDateString()}</div>
                   </div>
 
@@ -215,7 +280,7 @@ export default function Videos() {
                       {video.upload_status}
                     </span>
                     <button
-                      onClick={() => deleteVideo(video.id)}
+                      onClick={() => deleteVideo(video.id, video.r2_key || '')}
                       className="text-slate-400 hover:text-red-600 transition"
                     >
                       <Trash2 className="w-4 h-4" />
