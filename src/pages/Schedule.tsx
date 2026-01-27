@@ -51,13 +51,21 @@ export default function Schedule() {
   }, [user]);
 
   useEffect(() => {
-    // Check if we are resuming a draft
     const draft = location.state?.draft as Draft;
     if (draft) {
+      // Wenn ein Entwurf geladen wird, konvertieren wir die Zeit zurück für das input-Feld
+      let localTime = '';
+      if (draft.metadata?.scheduled_time) {
+        const date = new Date(draft.metadata.scheduled_time);
+        localTime = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+          .toISOString()
+          .slice(0, 16);
+      }
+
       setFormData({
         integration_id: draft.integration_id || '',
         video_id: draft.video_id || '',
-        scheduled_time: '',
+        scheduled_time: localTime,
         title: draft.title || '',
         description: draft.description || '',
         tags: draft.tags?.join(', ') || '',
@@ -72,14 +80,12 @@ export default function Schedule() {
 
   const loadData = async () => {
     if (!user) return;
-
     setLoading(true);
     try {
       const [integrationsRes, videosRes] = await Promise.all([
         supabase.from('integrations').select('*').eq('user_id', user.id).eq('is_active', true),
         supabase.from('videos').select('*').eq('user_id', user.id).eq('upload_status', 'completed'),
       ]);
-
       setIntegrations(integrationsRes.data || []);
       setVideos(videosRes.data || []);
     } catch (error) {
@@ -98,12 +104,15 @@ export default function Schedule() {
       const integration = integrations.find(i => i.id === formData.integration_id);
       if (!integration) throw new Error('Integration not found');
 
+      // WICHTIG: Zeit in UTC ISO String konvertieren
+      const scheduledIso = new Date(formData.scheduled_time).toISOString();
+
       const { error } = await supabase.from('scheduled_posts').insert({
         user_id: user.id,
         integration_id: formData.integration_id,
         video_id: formData.video_id,
         platform: integration.platform,
-        scheduled_time: formData.scheduled_time,
+        scheduled_time: scheduledIso,
         status: 'pending',
         title: formData.title,
         description: formData.description,
@@ -117,16 +126,15 @@ export default function Schedule() {
 
       if (error) throw error;
 
-      // Delete draft if it exists
       if (location.state?.draft?.id) {
         await supabase.from('drafts').delete().eq('id', location.state.draft.id);
       }
 
-      alert('Post scheduled successfully!');
+      alert('Post erfolgreich geplant!');
       navigate('/scheduled');
     } catch (error) {
       console.error('Error scheduling post:', error);
-      alert('Failed to schedule post');
+      alert('Fehler beim Planen des Posts');
     } finally {
       setSubmitting(false);
     }
@@ -134,9 +142,11 @@ export default function Schedule() {
 
   const saveDraft = async () => {
     if (!user) return;
-
     try {
       const integration = integrations.find(i => i.id === formData.integration_id);
+      
+      // Zeit für Entwurf ebenfalls konvertieren, falls vorhanden
+      const scheduledIso = formData.scheduled_time ? new Date(formData.scheduled_time).toISOString() : null;
 
       const draftData = {
         user_id: user.id,
@@ -151,6 +161,7 @@ export default function Schedule() {
         video_type: formData.video_type as any,
         made_for_kids: formData.made_for_kids,
         notify_subscribers: formData.notify_subscribers,
+        metadata: { scheduled_time: scheduledIso } // Zeit im Metadata speichern
       };
 
       if (location.state?.draft?.id) {
@@ -164,11 +175,11 @@ export default function Schedule() {
         if (error) throw error;
       }
 
-      alert('Draft saved successfully!');
+      alert('Entwurf gespeichert!');
       navigate('/drafts');
     } catch (error) {
       console.error('Error saving draft:', error);
-      alert('Failed to save draft');
+      alert('Fehler beim Speichern des Entwurfs');
     }
   };
 
@@ -190,10 +201,10 @@ export default function Schedule() {
             <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <AlertCircle className="w-8 h-8 text-slate-400" />
             </div>
-            <h3 className="text-lg font-semibold text-slate-900 mb-2">Unable to Schedule Post</h3>
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">Planen nicht möglich</h3>
             <p className="text-slate-600 mb-6">
-              {integrations.length === 0 && 'You need to connect at least one social media account. '}
-              {videos.length === 0 && 'You need to upload at least one video. '}
+              {integrations.length === 0 && 'Verbinde zuerst einen Account. '}
+              {videos.length === 0 && 'Lade zuerst ein Video hoch. '}
             </p>
             <div className="flex gap-3 justify-center">
               {integrations.length === 0 && (
@@ -201,7 +212,7 @@ export default function Schedule() {
                   onClick={() => navigate('/integrations')}
                   className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition"
                 >
-                  Connect Account
+                  Account verbinden
                 </button>
               )}
               {videos.length === 0 && (
@@ -209,7 +220,7 @@ export default function Schedule() {
                   onClick={() => navigate('/videos')}
                   className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition"
                 >
-                  Upload Video
+                  Video hochladen
                 </button>
               )}
             </div>
@@ -223,23 +234,21 @@ export default function Schedule() {
     <Layout>
       <div className="p-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">Schedule Post</h1>
-          <p className="text-slate-600">Create a new scheduled post for your social media</p>
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">Post planen</h1>
+          <p className="text-slate-600">Erstelle einen neuen geplanten Post</p>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-3xl">
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Select Account
-              </label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Account auswählen</label>
               <select
                 required
                 value={formData.integration_id}
                 onChange={(e) => setFormData({ ...formData, integration_id: e.target.value })}
                 className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="">Choose an account...</option>
+                <option value="">Wähle einen Account...</option>
                 {integrations.map((integration) => (
                   <option key={integration.id} value={integration.id}>
                     {integration.platform.toUpperCase()} - {integration.channel_name}
@@ -249,28 +258,22 @@ export default function Schedule() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Select Video
-              </label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Video auswählen</label>
               <select
                 required
                 value={formData.video_id}
                 onChange={(e) => setFormData({ ...formData, video_id: e.target.value })}
                 className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="">Choose a video...</option>
+                <option value="">Wähle ein Video...</option>
                 {videos.map((video) => (
-                  <option key={video.id} value={video.id}>
-                    {video.file_name}
-                  </option>
+                  <option key={video.id} value={video.id}>{video.file_name}</option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Schedule Date & Time
-              </label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Datum & Uhrzeit</label>
               <input
                 type="datetime-local"
                 required
@@ -281,9 +284,7 @@ export default function Schedule() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Title <span className="text-red-500">*</span>
-              </label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Titel <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 required
@@ -291,28 +292,24 @@ export default function Schedule() {
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                 className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter video title"
+                placeholder="Video Titel"
               />
-              <p className="text-sm text-slate-500 mt-1">{formData.title.length}/100 characters</p>
+              <p className="text-sm text-slate-500 mt-1">{formData.title.length}/100 Zeichen</p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Description
-              </label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Beschreibung</label>
               <textarea
                 rows={4}
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Enter video description"
+                placeholder="Video Beschreibung"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Tags (comma-separated)
-              </label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Tags (mit Komma getrennt)</label>
               <input
                 type="text"
                 value={formData.tags}
@@ -324,86 +321,30 @@ export default function Schedule() {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Category
-                </label>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Kategorie</label>
                 <select
                   value={formData.category}
                   onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                   className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                   {YOUTUBE_CATEGORIES.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.name}
-                    </option>
+                    <option key={cat.id} value={cat.id}>{cat.name}</option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Privacy
-                </label>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Sichtbarkeit</label>
                 <select
                   value={formData.privacy_status}
                   onChange={(e) => setFormData({ ...formData, privacy_status: e.target.value })}
                   className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="public">Public</option>
-                  <option value="unlisted">Unlisted</option>
-                  <option value="private">Private</option>
+                  <option value="public">Öffentlich</option>
+                  <option value="unlisted">Nicht gelistet</option>
+                  <option value="private">Privat</option>
                 </select>
               </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Video Type
-              </label>
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    value="normal"
-                    checked={formData.video_type === 'normal'}
-                    onChange={(e) => setFormData({ ...formData, video_type: e.target.value })}
-                    className="w-4 h-4 text-blue-600"
-                  />
-                  <span>Normal Video</span>
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    value="short"
-                    checked={formData.video_type === 'short'}
-                    onChange={(e) => setFormData({ ...formData, video_type: e.target.value })}
-                    className="w-4 h-4 text-blue-600"
-                  />
-                  <span>YouTube Short</span>
-                </label>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={formData.made_for_kids}
-                  onChange={(e) => setFormData({ ...formData, made_for_kids: e.target.checked })}
-                  className="w-4 h-4 text-blue-600 rounded"
-                />
-                <span className="text-sm text-slate-700">Made for kids</span>
-              </label>
-
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={formData.notify_subscribers}
-                  onChange={(e) => setFormData({ ...formData, notify_subscribers: e.target.checked })}
-                  className="w-4 h-4 text-blue-600 rounded"
-                />
-                <span className="text-sm text-slate-700">Notify subscribers</span>
-              </label>
             </div>
 
             <div className="flex gap-3 pt-4">
@@ -413,14 +354,14 @@ export default function Schedule() {
                 className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition disabled:opacity-50"
               >
                 <Calendar className="w-5 h-5" />
-                {submitting ? 'Scheduling...' : 'Schedule Post'}
+                {submitting ? 'Wird geplant...' : 'Post planen'}
               </button>
               <button
                 type="button"
                 onClick={saveDraft}
                 className="px-6 py-3 border border-slate-300 text-slate-700 font-semibold rounded-lg hover:bg-slate-50 transition"
               >
-                Save Draft
+                Entwurf speichern
               </button>
             </div>
           </form>
