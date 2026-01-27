@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Integration, Video as VideoType } from '../types';
+import { Integration, Video as VideoType, Draft } from '../types';
 import { Calendar, AlertCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 
@@ -26,6 +26,7 @@ const YOUTUBE_CATEGORIES = [
 export default function Schedule() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [videos, setVideos] = useState<VideoType[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,6 +49,26 @@ export default function Schedule() {
   useEffect(() => {
     loadData();
   }, [user]);
+
+  useEffect(() => {
+    // Check if we are resuming a draft
+    const draft = location.state?.draft as Draft;
+    if (draft) {
+      setFormData({
+        integration_id: draft.integration_id || '',
+        video_id: draft.video_id || '',
+        scheduled_time: '',
+        title: draft.title || '',
+        description: draft.description || '',
+        tags: draft.tags?.join(', ') || '',
+        category: draft.category || '28',
+        privacy_status: draft.privacy_status || 'public',
+        video_type: (draft.video_type as any) || 'normal',
+        made_for_kids: !!draft.made_for_kids,
+        notify_subscribers: !!draft.notify_subscribers,
+      });
+    }
+  }, [location.state]);
 
   const loadData = async () => {
     if (!user) return;
@@ -96,6 +117,11 @@ export default function Schedule() {
 
       if (error) throw error;
 
+      // Delete draft if it exists
+      if (location.state?.draft?.id) {
+        await supabase.from('drafts').delete().eq('id', location.state.draft.id);
+      }
+
       alert('Post scheduled successfully!');
       navigate('/scheduled');
     } catch (error) {
@@ -112,7 +138,7 @@ export default function Schedule() {
     try {
       const integration = integrations.find(i => i.id === formData.integration_id);
 
-      const { error } = await supabase.from('drafts').insert({
+      const draftData = {
         user_id: user.id,
         integration_id: formData.integration_id || null,
         video_id: formData.video_id || null,
@@ -121,13 +147,23 @@ export default function Schedule() {
         description: formData.description || null,
         tags: formData.tags ? formData.tags.split(',').map(t => t.trim()) : [],
         category: formData.category,
-        privacy_status: formData.privacy_status,
-        video_type: formData.video_type,
+        privacy_status: formData.privacy_status as any,
+        video_type: formData.video_type as any,
         made_for_kids: formData.made_for_kids,
         notify_subscribers: formData.notify_subscribers,
-      });
+      };
 
-      if (error) throw error;
+      if (location.state?.draft?.id) {
+        const { error } = await supabase
+          .from('drafts')
+          .update(draftData)
+          .eq('id', location.state.draft.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('drafts').insert(draftData);
+        if (error) throw error;
+      }
+
       alert('Draft saved successfully!');
       navigate('/drafts');
     } catch (error) {
