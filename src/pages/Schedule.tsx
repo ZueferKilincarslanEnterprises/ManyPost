@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Integration, Video as VideoType, Draft } from '../types';
-import { Calendar, AlertCircle } from 'lucide-react';
+import { Integration, Video as VideoType, Draft, ScheduledPost } from '../types';
+import { Calendar, AlertCircle, Save } from 'lucide-react';
 import Layout from '../components/Layout';
 
 const YOUTUBE_CATEGORIES = [
@@ -31,6 +31,7 @@ export default function Schedule() {
   const [videos, setVideos] = useState<VideoType[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     integration_id: '',
@@ -52,28 +53,35 @@ export default function Schedule() {
 
   useEffect(() => {
     const draft = location.state?.draft as Draft;
-    if (draft) {
-      // Wenn ein Entwurf geladen wird, konvertieren wir die Zeit zurück für das input-Feld
+    const scheduledPost = location.state?.scheduledPost as ScheduledPost;
+
+    if (draft || scheduledPost) {
+      const source = draft || scheduledPost;
+      if (scheduledPost) setEditingId(scheduledPost.id);
+
+      // Zeit konvertieren für das datetime-local input
       let localTime = '';
-      if (draft.metadata?.scheduled_time) {
-        const date = new Date(draft.metadata.scheduled_time);
+      const timeToConvert = scheduledPost ? scheduledPost.scheduled_time : draft?.metadata?.scheduled_time;
+      
+      if (timeToConvert) {
+        const date = new Date(timeToConvert);
         localTime = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
           .toISOString()
           .slice(0, 16);
       }
 
       setFormData({
-        integration_id: draft.integration_id || '',
-        video_id: draft.video_id || '',
+        integration_id: source.integration_id || '',
+        video_id: source.video_id || '',
         scheduled_time: localTime,
-        title: draft.title || '',
-        description: draft.description || '',
-        tags: draft.tags?.join(', ') || '',
-        category: draft.category || '28',
-        privacy_status: draft.privacy_status || 'public',
-        video_type: (draft.video_type as any) || 'normal',
-        made_for_kids: !!draft.made_for_kids,
-        notify_subscribers: !!draft.notify_subscribers,
+        title: source.title || '',
+        description: source.description || '',
+        tags: Array.isArray(source.tags) ? source.tags.join(', ') : '',
+        category: source.category || '28',
+        privacy_status: source.privacy_status || 'public',
+        video_type: (source.video_type as any) || 'normal',
+        made_for_kids: !!source.made_for_kids,
+        notify_subscribers: !!source.notify_subscribers,
       });
     }
   }, [location.state]);
@@ -104,10 +112,9 @@ export default function Schedule() {
       const integration = integrations.find(i => i.id === formData.integration_id);
       if (!integration) throw new Error('Integration not found');
 
-      // WICHTIG: Zeit in UTC ISO String konvertieren
       const scheduledIso = new Date(formData.scheduled_time).toISOString();
 
-      const { error } = await supabase.from('scheduled_posts').insert({
+      const postData = {
         user_id: user.id,
         integration_id: formData.integration_id,
         video_id: formData.video_id,
@@ -122,19 +129,29 @@ export default function Schedule() {
         video_type: formData.video_type,
         made_for_kids: formData.made_for_kids,
         notify_subscribers: formData.notify_subscribers,
-      });
+      };
 
-      if (error) throw error;
+      if (editingId) {
+        const { error } = await supabase
+          .from('scheduled_posts')
+          .update(postData)
+          .eq('id', editingId);
+        if (error) throw error;
+        alert('Post erfolgreich aktualisiert!');
+      } else {
+        const { error } = await supabase.from('scheduled_posts').insert(postData);
+        if (error) throw error;
+        alert('Post erfolgreich geplant!');
+      }
 
       if (location.state?.draft?.id) {
         await supabase.from('drafts').delete().eq('id', location.state.draft.id);
       }
 
-      alert('Post erfolgreich geplant!');
       navigate('/scheduled');
     } catch (error) {
       console.error('Error scheduling post:', error);
-      alert('Fehler beim Planen des Posts');
+      alert('Fehler beim Speichern des Posts');
     } finally {
       setSubmitting(false);
     }
@@ -144,8 +161,6 @@ export default function Schedule() {
     if (!user) return;
     try {
       const integration = integrations.find(i => i.id === formData.integration_id);
-      
-      // Zeit für Entwurf ebenfalls konvertieren, falls vorhanden
       const scheduledIso = formData.scheduled_time ? new Date(formData.scheduled_time).toISOString() : null;
 
       const draftData = {
@@ -161,7 +176,7 @@ export default function Schedule() {
         video_type: formData.video_type as any,
         made_for_kids: formData.made_for_kids,
         notify_subscribers: formData.notify_subscribers,
-        metadata: { scheduled_time: scheduledIso } // Zeit im Metadata speichern
+        metadata: { scheduled_time: scheduledIso }
       };
 
       if (location.state?.draft?.id) {
@@ -193,53 +208,21 @@ export default function Schedule() {
     );
   }
 
-  if (integrations.length === 0 || videos.length === 0) {
-    return (
-      <Layout>
-        <div className="p-8">
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center">
-            <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <AlertCircle className="w-8 h-8 text-slate-400" />
-            </div>
-            <h3 className="text-lg font-semibold text-slate-900 mb-2">Planen nicht möglich</h3>
-            <p className="text-slate-600 mb-6">
-              {integrations.length === 0 && 'Verbinde zuerst einen Account. '}
-              {videos.length === 0 && 'Lade zuerst ein Video hoch. '}
-            </p>
-            <div className="flex gap-3 justify-center">
-              {integrations.length === 0 && (
-                <button
-                  onClick={() => navigate('/integrations')}
-                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition"
-                >
-                  Account verbinden
-                </button>
-              )}
-              {videos.length === 0 && (
-                <button
-                  onClick={() => navigate('/videos')}
-                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition"
-                >
-                  Video hochladen
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </Layout>
-    );
-  }
-
   return (
     <Layout>
       <div className="p-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">Post planen</h1>
-          <p className="text-slate-600">Erstelle einen neuen geplanten Post</p>
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">
+            {editingId ? 'Post bearbeiten' : 'Post planen'}
+          </h1>
+          <p className="text-slate-600">
+            {editingId ? 'Ändere die Details deines geplanten Posts' : 'Erstelle einen neuen geplanten Post'}
+          </p>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-3xl">
           <form onSubmit={handleSubmit} className="space-y-6">
+            {/* ... Gleiches Formular wie zuvor, aber mit dynamischem Button-Text ... */}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">Account auswählen</label>
               <select
@@ -353,16 +336,18 @@ export default function Schedule() {
                 disabled={submitting}
                 className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition disabled:opacity-50"
               >
-                <Calendar className="w-5 h-5" />
-                {submitting ? 'Wird geplant...' : 'Post planen'}
+                {editingId ? <Save className="w-5 h-5" /> : <Calendar className="w-5 h-5" />}
+                {submitting ? 'Wird gespeichert...' : editingId ? 'Änderungen speichern' : 'Post planen'}
               </button>
-              <button
-                type="button"
-                onClick={saveDraft}
-                className="px-6 py-3 border border-slate-300 text-slate-700 font-semibold rounded-lg hover:bg-slate-50 transition"
-              >
-                Entwurf speichern
-              </button>
+              {!editingId && (
+                <button
+                  type="button"
+                  onClick={saveDraft}
+                  className="px-6 py-3 border border-slate-300 text-slate-700 font-semibold rounded-lg hover:bg-slate-50 transition"
+                >
+                  Entwurf speichern
+                </button>
+              )}
             </div>
           </form>
         </div>
