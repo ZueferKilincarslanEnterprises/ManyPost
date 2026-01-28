@@ -3,11 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { ScheduledPost, Integration, Video as VideoType } from '../types';
-<<<<<<< HEAD
-import { Clock, X, Play, AlertCircle, Youtube, Loader2 } from 'lucide-react';
-=======
 import { Clock, X, Play, AlertCircle, Youtube, Edit } from 'lucide-react';
->>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
 import Layout from '../components/Layout';
 
 interface ScheduledPostWithDetails extends ScheduledPost {
@@ -47,24 +43,17 @@ export default function ScheduledPosts() {
   };
 
   const cancelPost = async (id: string) => {
-<<<<<<< HEAD
-    if (!confirm('Are you sure you want to cancel this scheduled post?')) return;
-=======
     if (!confirm('Geplanten Post wirklich abbrechen?')) {
       return;
     }
 
->>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
     try {
       const { error } = await supabase.from('scheduled_posts').update({ status: 'cancelled' }).eq('id', id);
       if (error) throw error;
       loadPosts();
     } catch (error) {
       console.error('Error cancelling post:', error);
-<<<<<<< HEAD
-=======
       alert('Fehler beim Abbrechen');
->>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
     }
   };
 
@@ -73,21 +62,6 @@ export default function ScheduledPosts() {
   };
 
   const postNow = async (id: string) => {
-<<<<<<< HEAD
-    if (!confirm('Are you sure you want to post this immediately?')) return;
-    
-    setProcessingId(id);
-    try {
-      const { data, error } = await supabase.functions.invoke('youtube-publisher', {
-        body: { scheduled_post_id: id }
-      });
-
-      if (error || data?.error) {
-        throw new Error(data?.error || 'Publishing failed');
-      }
-
-      alert('Successfully published to YouTube!');
-=======
     if (!confirm('Diesen Post jetzt sofort veröffentlichen?')) {
       return;
     }
@@ -127,20 +101,12 @@ export default function ScheduledPosts() {
       }
 
       alert('Post wird jetzt veröffentlicht! Prüfe in Kürze die Post History.');
->>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
       loadPosts();
     } catch (error: any) {
       console.error('Error posting now:', error);
-<<<<<<< HEAD
-      alert('Failed to publish: ' + error.message);
-      loadPosts(); // Refresh to see error status
-    } finally {
-      setProcessingId(null);
-=======
       alert(`Fehler beim Veröffentlichen: ${error instanceof Error ? error.message : 'Unbekannter Fehler'}`);
     } finally {
       setLoading(false);
->>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
     }
   };
 
@@ -153,9 +119,6 @@ export default function ScheduledPosts() {
     return styles[status as keyof typeof styles] || 'bg-slate-100 text-slate-700';
   };
 
-<<<<<<< HEAD
-  const filteredPosts = filter === 'all' ? posts : posts.filter(p => p.status === filter);
-=======
   const getTimeUntil = (scheduledTime: string) => {
     const now = new Date();
     const scheduled = new Date(scheduledTime);
@@ -175,7 +138,6 @@ export default function ScheduledPosts() {
   const filteredPosts = filter === 'all'
     ? posts
     : posts.filter(p => p.status === filter);
->>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
 
   return (
     <Layout>
@@ -226,33 +188,15 @@ export default function ScheduledPosts() {
                         {post.status}
                       </span>
                     </div>
-<<<<<<< HEAD
-=======
-
->>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
                     <div className="flex items-center gap-4 text-sm text-slate-500 mb-4">
                       <div className="flex items-center gap-1">
                         <Clock className="w-4 h-4" />
                         <span>{new Date(post.scheduled_time).toLocaleString()}</span>
                       </div>
-<<<<<<< HEAD
-                      <span className="px-2 py-1 bg-slate-100 rounded">{post.privacy_status}</span>
-=======
->>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
                     </div>
                     <div className="flex gap-2">
                       <button
                         onClick={() => postNow(post.id)}
-<<<<<<< HEAD
-                        disabled={post.status === 'processing' || processingId === post.id}
-                        className="flex items-center gap-1 px-3 py-2 text-blue-600 hover:bg-blue-50 rounded-lg transition disabled:opacity-50"
-                      >
-                        {processingId === post.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                        {processingId === post.id ? 'Publishing...' : 'Post Now'}
-                      </button>
-                      <button onClick={() => cancelPost(post.id)} className="flex items-center gap-1 px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition">
-                        <X className="w-4 h-4" /> Cancel
-=======
                         disabled={post.status === 'processing'}
                         className="flex items-center gap-1 px-3 py-2 text-blue-600 hover:bg-blue-50 rounded-lg transition disabled:opacity-50"
                       >
@@ -274,7 +218,6 @@ export default function ScheduledPosts() {
                       >
                         <X className="w-4 h-4" />
                         Abbrechen
->>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
                       </button>
                     </div>
                   </div>
