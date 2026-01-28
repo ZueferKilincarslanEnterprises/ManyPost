@@ -20,7 +20,7 @@ src/
 │   ├── Schedule.tsx           # Create scheduled posts
 │   ├── ScheduledPosts.tsx     # View pending scheduled posts
 │   ├── Signup.tsx             # User registration
-│   └── Videos.tsx             # Video library management
+│   └── Videos.tsx             # Video library management with previews
 ├── types/
 │   └── index.ts               # TypeScript type definitions
 ├── App.tsx                    # Main app with routing
@@ -39,8 +39,12 @@ supabase/
     │   └── index.ts           # YouTube OAuth flow
     ├── youtube-publisher/
     │   └── index.ts           # Publish videos to YouTube
-    └── cron-publisher/
-        └── index.ts           # Cron job for scheduled publishing
+    ├── cron-publisher/
+    │   └── index.ts           # Cron job for scheduled publishing
+    ├── generate-r2-signed-url/
+    │   └── index.ts           # Generate signed URLs for R2 uploads
+    └── delete-r2-video/
+        └── index.ts           # Delete videos from Cloudflare R2 storage
 ```
 
 ## Database Schema
@@ -80,11 +84,11 @@ supabase/
 - Coming soon badges for Instagram/TikTok
 
 ### Videos
-- File upload interface
+- File upload interface with preview generation
 - Video library grid view
 - Thumbnail display
 - File size and duration info
-- Delete functionality
+- Delete functionality with Cloudflare R2 cleanup
 - Upload status tracking
 
 ### Schedule Post
@@ -164,6 +168,18 @@ Automated scheduling system:
 - Triggers youtube-publisher
 - Handles errors gracefully
 
+### generate-r2-signed-url
+Generates signed URLs for secure Cloudflare R2 uploads:
+- Authenticates user
+- Creates unique object keys
+- Generates time-limited signed URLs
+
+### delete-r2-video
+Deletes videos from Cloudflare R2 storage:
+- Authenticates with service key
+- Removes objects from R2 bucket
+- Used when deleting videos from the library
+
 ## Security Features
 
 ### Database Level
@@ -241,7 +257,8 @@ Automated scheduling system:
 - [ ] User can log in
 - [ ] API key is generated
 - [ ] YouTube OAuth works
-- [ ] Videos can be uploaded
+- [ ] Videos can be uploaded with previews
+- [ ] Videos can be deleted from both Supabase and R2
 - [ ] Posts can be scheduled
 - [ ] Cron job processes posts
 - [ ] Posts appear in history
