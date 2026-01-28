@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
 import { AlertCircle, CheckCircle } from 'lucide-react';
 
 export default function OAuthCallback() {
@@ -14,7 +13,6 @@ export default function OAuthCallback() {
 
   useEffect(() => {
     const handleCallback = async () => {
-      // Verhindert doppelte Ausführung in React Strict Mode
       if (processing.current) return;
       
       const code = searchParams.get('code');
@@ -38,9 +36,6 @@ export default function OAuthCallback() {
           return;
         }
 
-        console.log("Processing YouTube OAuth callback...");
-
-        // Die redirect_uri muss EXAKT die sein, die auch beim Login verwendet wurde
         const currentCallbackUrl = `${window.location.origin}/youtube-oauth`;
 
         const response = await fetch(
@@ -53,17 +48,14 @@ export default function OAuthCallback() {
         const result = await response.json();
         
         if (!response.ok || result.error) {
-          console.error("OAuth Error Result:", result);
           throw new Error(result.error || 'Connection failed');
         }
 
         setStatus('success');
         setMessage(`Successfully connected: ${result.channel.name}`);
         
-        // Kurze Pause für die Erfolgsmeldung
         setTimeout(() => navigate('/integrations'), 2000);
       } catch (err: any) {
-        console.error("Callback catch error:", err);
         setStatus('error');
         setMessage(err.message || 'Failed to process callback');
       }
