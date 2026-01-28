@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams, Link } from 'react-router-dom'; // URL Params nutzen
+import { useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { BarChart3, TrendingUp, Users, ThumbsUp, RefreshCw, ChevronLeft } from 'lucide-react';
+import { TrendingUp, Users, ThumbsUp, RefreshCw, ChevronLeft } from 'lucide-react';
 import Layout from '../components/Layout';
 
 interface VideoStatSummary {
@@ -54,6 +54,7 @@ export default function Analytics() {
           title,
           platform_post_id,
           integration_id,
+          posted_at,
           video_stats (
             view_count,
             like_count,
@@ -64,7 +65,6 @@ export default function Analytics() {
         .eq('user_id', user.id)
         .eq('status', 'success');
 
-      // Filter nach Kanal anwenden, falls ID vorhanden
       if (integrationId) {
         query = query.eq('integration_id', integrationId);
       }
@@ -100,7 +100,7 @@ export default function Analytics() {
   const triggerSync = async () => {
     setSyncing(true);
     try {
-      const { data, error } = await supabase.functions.invoke('sync-video-stats');
+      const { error } = await supabase.functions.invoke('sync-video-stats');
       if (error) throw error;
       await loadAnalytics();
       alert('Statistiken wurden erfolgreich aktualisiert!');
