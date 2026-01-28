@@ -15,6 +15,7 @@ interface VideoMetadata {
   privacyStatus: string;
   madeForKids: boolean;
   notifySubscribers: boolean;
+  videoType: 'normal' | 'short';
 }
 
 async function refreshAccessToken(refreshToken: string, clientId: string, clientSecret: string): Promise<string> {
@@ -60,7 +61,6 @@ async function downloadFromR2(r2Key: string): Promise<Blob> {
   const response = await s3Client.send(command);
   if (!response.Body) throw new Error("Empty response body from R2");
 
-  // Wir wandeln den Stream in ein Blob um, das YouTube API verarbeiten kann
   const bytes = await response.Body.transformToByteArray();
   return new Blob([bytes]);
 }
@@ -70,13 +70,16 @@ async function uploadToYouTube(
   r2Key: string,
   metadata: VideoMetadata
 ): Promise<{ videoId: string; videoUrl: string }> {
-  console.log(`[youtube-publisher] Downloading video from R2 with key: ${r2Key}...`);
+  console.log(`[youtube-publisher] Downloading video from R2...`);
   const videoBlob = await downloadFromR2(r2Key);
-  console.log(`[youtube-publisher] Video downloaded. Size: ${videoBlob.size} bytes`);
+
+  let title = metadata.title;
+  if (metadata.videoType === 'short' && !title.toLowerCase().includes('#shorts')) {
+    title = title.length > 92 ? title.substring(0, 92) + ' #Shorts' : title + ' #Shorts';
+  }
 
   const uploadUrl = 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status';
 
-  console.log("[youtube-publisher] Initiating resumable upload...");
   const initResponse = await fetch(uploadUrl, {
     method: 'POST',
     headers: {
@@ -86,7 +89,7 @@ async function uploadToYouTube(
     },
     body: JSON.stringify({
       snippet: {
-        title: metadata.title,
+        title: title,
         description: metadata.description || '',
         tags: metadata.tags || [],
         categoryId: metadata.categoryId || '28',
@@ -105,24 +108,17 @@ async function uploadToYouTube(
   }
 
   const uploadLocation = initResponse.headers.get('Location');
-  if (!uploadLocation) {
-    throw new Error('Failed to get upload location');
-  }
+  if (!uploadLocation) throw new Error('Failed to get upload location');
 
   console.log("[youtube-publisher] Uploading video data to YouTube...");
   const uploadResponse = await fetch(uploadLocation, {
     method: 'PUT',
-    headers: {
-      'Content-Type': 'video/*',
-    },
+    headers: { 'Content-Type': 'video/*' },
     body: videoBlob,
   });
 
   const result = await uploadResponse.json();
-
-  if (!result.id) {
-    throw new Error('YouTube Upload Error: ' + JSON.stringify(result));
-  }
+  if (!result.id) throw new Error('YouTube Upload Error: ' + JSON.stringify(result));
 
   return {
     videoId: result.id,
@@ -132,73 +128,78 @@ async function uploadToYouTube(
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 200,
-      headers: corsHeaders,
-    });
+    return new Response(null, { status: 200, headers: corsHeaders });
   }
 
-  let scheduledPostId = null;
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+  let scheduledPostId = null;
 
   try {
+    // Authentication Check
+    const authHeader = req.headers.get('Authorization');
+    const token = authHeader?.replace('Bearer ', '');
+    
+    if (!token) {
+      return new Response(JSON.stringify({ error: 'Missing authorization' }), { status: 401, headers: corsHeaders });
+    }
+
+    let user = null;
+    const isServiceRole = token === supabaseServiceKey;
+
+    if (!isServiceRole) {
+      // If not service role, it must be a valid user token
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser(token);
+      if (authError || !authUser) {
+        console.error('[youtube-publisher] Auth error:', authError?.message);
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
+      }
+      user = authUser;
+    }
+
     const body = await req.json();
     scheduledPostId = body.scheduled_post_id;
+    if (!scheduledPostId) throw new Error('Missing scheduled_post_id');
 
-    if (!scheduledPostId) {
-      throw new Error('Missing scheduled_post_id');
+    console.log(`[youtube-publisher] Processing post ID: ${scheduledPostId} (Authorized as: ${isServiceRole ? 'Service Role' : user?.id})`);
+
+    // Fetch post and verify ownership if not service role
+    let query = supabase
+      .from('scheduled_posts')
+      .select(`*, integration:integrations(*), video:videos(*)`)
+      .eq('id', scheduledPostId);
+
+    if (!isServiceRole && user) {
+      query = query.eq('user_id', user.id);
     }
 
-    console.log(`[youtube-publisher] Processing post ID: ${scheduledPostId}`);
-
-    const { data: post, error: postError } = await supabase
-      .from('scheduled_posts')
-      .select(`
-        *,
-        integration:integrations(*),
-        video:videos(*)
-      `)
-      .eq('id', scheduledPostId)
-      .maybeSingle();
+    const { data: post, error: postError } = await query.maybeSingle();
 
     if (postError || !post) {
-      throw new Error('Scheduled post not found');
+      console.error('[youtube-publisher] Post not found or access denied');
+      throw new Error('Scheduled post not found or access denied');
     }
+    
+    if (!post.video?.r2_key) throw new Error('Video R2 key not found');
 
-    if (!post.video?.r2_key) {
-      throw new Error('Video R2 key not found in database');
-    }
-
-    // Set status to processing
-    await supabase
-      .from('scheduled_posts')
-      .update({ status: 'processing' })
-      .eq('id', scheduledPostId);
+    // Update status to processing
+    await supabase.from('scheduled_posts').update({ status: 'processing' }).eq('id', scheduledPostId);
 
     const clientId = Deno.env.get('YOUTUBE_CLIENT_ID')!;
     const clientSecret = Deno.env.get('YOUTUBE_CLIENT_SECRET')!;
 
     let accessToken = post.integration.access_token;
-
-    // Refresh token if needed
     const tokenExpiry = post.integration.token_expires_at ? new Date(post.integration.token_expires_at) : new Date(0);
-    if (tokenExpiry < new Date(Date.now() + 60000)) { // Refresh falls weniger als 1 Minute übrig
+    
+    if (tokenExpiry < new Date(Date.now() + 60000)) {
       console.log("[youtube-publisher] Refreshing access token...");
-      accessToken = await refreshAccessToken(
-        post.integration.refresh_token,
-        clientId,
-        clientSecret
-      );
-
-      await supabase
-        .from('integrations')
-        .update({
-          access_token: accessToken,
-          token_expires_at: new Date(Date.now() + 3500000).toISOString(),
-        })
-        .eq('id', post.integration.id);
+      accessToken = await refreshAccessToken(post.integration.refresh_token, clientId, clientSecret);
+      await supabase.from('integrations').update({
+        access_token: accessToken,
+        token_expires_at: new Date(Date.now() + 3500000).toISOString(),
+      }).eq('id', post.integration.id);
     }
 
     const result = await uploadToYouTube(accessToken, post.video.r2_key, {
@@ -209,79 +210,36 @@ Deno.serve(async (req: Request) => {
       privacyStatus: post.privacy_status,
       madeForKids: post.made_for_kids,
       notifySubscribers: post.notify_subscribers,
+      videoType: post.video_type,
     });
 
     console.log(`[youtube-publisher] Successfully posted! Video ID: ${result.videoId}`);
 
-    await supabase
-      .from('scheduled_posts')
-      .update({ status: 'posted' })
-      .eq('id', scheduledPostId);
+    await supabase.from('scheduled_posts').update({ status: 'posted' }).eq('id', scheduledPostId);
+    await supabase.from('post_history').insert({
+      user_id: post.user_id,
+      scheduled_post_id: scheduledPostId,
+      integration_id: post.integration_id,
+      video_id: post.video_id,
+      platform: post.platform,
+      platform_post_id: result.videoId,
+      platform_post_url: result.videoUrl,
+      title: post.title,
+      status: 'success',
+      posted_at: new Date().toISOString(),
+    });
 
-    await supabase
-      .from('post_history')
-      .insert({
-        user_id: post.user_id,
-        scheduled_post_id: scheduledPostId,
-        integration_id: post.integration_id,
-        video_id: post.video_id,
-        platform: post.platform,
-        platform_post_id: result.videoId,
-        platform_post_url: result.videoUrl,
-        title: post.title,
-        status: 'success',
-        posted_at: new Date().toISOString(),
-      });
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        videoId: result.videoId,
-        videoUrl: result.videoUrl,
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    );
+    return new Response(JSON.stringify({ success: true, videoId: result.videoId }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
 
   } catch (error: any) {
     console.error('[youtube-publisher] Error:', error);
-
     if (scheduledPostId) {
-      await supabase
-        .from('scheduled_posts')
-        .update({ status: 'failed' })
-        .eq('id', scheduledPostId);
-
-      const { data: post } = await supabase
-        .from('scheduled_posts')
-        .select('user_id, integration_id, video_id, platform, title')
-        .eq('id', scheduledPostId)
-        .maybeSingle();
-
-      if (post) {
-        await supabase
-          .from('post_history')
-          .insert({
-            user_id: post.user_id,
-            scheduled_post_id: scheduledPostId,
-            integration_id: post.integration_id,
-            video_id: post.video_id,
-            platform: post.platform,
-            title: post.title,
-            status: 'failed',
-            error_message: error.message,
-            posted_at: new Date().toISOString(),
-          });
-      }
+      await supabase.from('scheduled_posts').update({ status: 'failed' }).eq('id', scheduledPostId);
     }
-
-    return new Response(
-      JSON.stringify({ error: error.message || 'Internal server error' }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    );
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 });

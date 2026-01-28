@@ -2,11 +2,11 @@ import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Video as VideoType } from '../types';
-import { Upload, Trash2, AlertCircle, Play } from 'lucide-react';
+import { Upload, Trash2, Play, Loader2, Video as VideoIcon } from 'lucide-react';
 import Layout from '../components/Layout';
 
 export default function Videos() {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [videos, setVideos] = useState<VideoType[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -37,36 +37,40 @@ export default function Videos() {
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !user) return;
+    if (!file || !user || !session) return;
 
     setUploading(true);
     setUploadProgress(0);
 
     try {
-      const { data: signData, error: signError } = await supabase.functions.invoke('generate-r2-signed-url', {
-        body: { fileName: file.name, contentType: file.type }
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-r2-signed-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ fileName: file.name, contentType: file.type })
       });
 
-      if (signError || !signData.signedUrl) throw new Error('Failed to get upload URL');
+      const signData = await response.json();
+      if (signData.error) throw new Error(signData.error);
 
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', signData.signedUrl, true);
       xhr.setRequestHeader('Content-Type', file.type);
-
+      
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) {
-          const percent = Math.round((event.loaded / event.total) * 100);
-          setUploadProgress(percent);
+          setUploadProgress(Math.round((event.loaded / event.total) * 100));
         }
       };
 
       const uploadPromise = new Promise((resolve, reject) => {
-        xhr.onload = () => xhr.status === 200 ? resolve(true) : reject(new Error('Upload failed'));
-        xhr.onerror = () => reject(new Error('Network error'));
+        xhr.onload = () => xhr.status === 200 ? resolve(true) : reject();
+        xhr.onerror = reject;
       });
 
       xhr.send(file);
       await uploadPromise;
+
+      const videoUrl = signData.signedUrl.split('?')[0];
 
       const { error: dbError } = await supabase
         .from('videos')
@@ -75,46 +79,38 @@ export default function Videos() {
           file_name: file.name,
           file_size: file.size,
           mime_type: file.type,
-          r2_url: signData.signedUrl.split('?')[0].replace('https://manypost-videos.bskuwtrrykvnptfivlrl.r2.cloudflarestorage.com/', `https://manypost-videos.bskuwtrrykvnptfivlrl.r2.cloudflarestorage.com/`), 
-          // Note: In a real app, you'd construct the public URL based on your R2 setup
+          r2_url: videoUrl,
           r2_key: signData.r2Key,
+          thumbnail_url: `${videoUrl}#t=1.5`, 
           upload_status: 'completed',
           uploaded_at: new Date().toISOString(),
         });
 
       if (dbError) throw dbError;
-      
       loadVideos();
     } catch (error: any) {
-      console.error('Error uploading video:', error);
-      alert('Failed to upload video: ' + error.message);
+      console.error('Upload error:', error);
+      alert('Upload fehlgeschlagen');
     } finally {
       setUploading(false);
-      setUploadProgress(0);
     }
   };
 
   const deleteVideo = async (video: VideoType) => {
-    if (!confirm('Are you sure you want to delete this video?')) return;
+    if (!confirm('Video löschen?')) return;
     try {
-      if (video.r2_key) {
-        await supabase.functions.invoke('delete-r2-video', {
-          body: { r2Key: video.r2_key, videoId: video.id }
+      if (video.r2_key && session) {
+        await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/delete-r2-video`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+          body: JSON.stringify({ r2Key: video.r2_key, videoId: video.id })
         });
       }
-      const { error } = await supabase.from('videos').delete().eq('id', video.id);
-      if (error) throw error;
+      await supabase.from('videos').delete().eq('id', video.id);
       loadVideos();
     } catch (error) {
-      console.error('Error deleting video:', error);
+      console.error('Delete error:', error);
     }
-  };
-
-  const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
-    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
-    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
   };
 
   return (
@@ -123,74 +119,74 @@ export default function Videos() {
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold text-slate-900 mb-2">Videos</h1>
-            <p className="text-slate-600">Upload and manage your video library</p>
+            <p className="text-slate-600">Deine Cloudflare-Bibliothek (optimierte Vorschau)</p>
           </div>
-          <label className={`flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition cursor-pointer ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
-            <Upload className="w-5 h-5" />
-            {uploading ? `Uploading ${uploadProgress}%...` : 'Upload Video'}
+          <label className={`flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition cursor-pointer ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
+            {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Upload className="w-5 h-5" />}
+            {uploading ? `Upload (${uploadProgress}%)...` : 'Video hochladen'}
             <input type="file" accept="video/*" onChange={handleFileSelect} disabled={uploading} className="hidden" />
           </label>
         </div>
 
-        {uploading && (
-          <div className="mb-8 p-4 bg-blue-50 border border-blue-200 rounded-xl">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-blue-700">Uploading file...</span>
-              <span className="text-sm font-bold text-blue-700">{uploadProgress}%</span>
-            </div>
-            <div className="w-full bg-blue-200 rounded-full h-2">
-              <div className="bg-blue-600 h-2 rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
-            </div>
-          </div>
-        )}
-
         {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <div className="flex items-center justify-center py-24">
+            <Loader2 className="w-12 h-12 text-blue-600 animate-spin" />
           </div>
         ) : videos.length === 0 ? (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center">
-            <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <AlertCircle className="w-8 h-8 text-slate-400" />
-            </div>
-            <h3 className="text-lg font-semibold text-slate-900 mb-2">No videos uploaded</h3>
-            <p className="text-slate-600 mb-6">Upload your first video to start scheduling posts</p>
+          <div className="bg-white rounded-2xl border-2 border-dashed border-slate-200 p-12 text-center">
+            <VideoIcon className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Keine Videos</h3>
+            <p className="text-slate-600">Lade ein Video hoch, um die Vorschau zu testen.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {videos.map((video) => (
-              <div key={video.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="relative aspect-video bg-slate-900 flex items-center justify-center">
-                  {video.r2_url ? (
-                    <>
-                      <video
-                        ref={(el) => (videoRefs.current[video.id] = el)}
-                        src={video.r2_url}
-                        className="w-full h-full object-cover"
-                        muted
-                        preload="metadata"
-                      />
-                      <div className="absolute inset-0 bg-black bg-opacity-30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                        <Play className="w-12 h-12 text-white" />
-                      </div>
-                    </>
-                  ) : (
-                    <div className="w-full h-full bg-slate-200 flex items-center justify-center">
-                      <AlertCircle className="w-12 h-12 text-slate-400" />
-                    </div>
-                  )}
-                </div>
-                <div className="p-4">
-                  <h3 className="font-semibold text-slate-900 mb-2 truncate" title={video.file_name}>{video.file_name}</h3>
-                  <div className="space-y-1 text-sm text-slate-600 mb-4">
-                    <div>Size: {formatFileSize(video.file_size)}</div>
-                    <div>Uploaded: {new Date(video.uploaded_at).toLocaleDateString()}</div>
+              <div 
+                key={video.id} 
+                className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden group hover:shadow-md transition"
+                onMouseEnter={() => {
+                  const v = videoRefs.current[video.id];
+                  if (v) v.play().catch(() => {});
+                }}
+                onMouseLeave={() => {
+                  const v = videoRefs.current[video.id];
+                  if (v) {
+                    v.pause();
+                    v.currentTime = 1.5;
+                  }
+                }}
+              >
+                <div className="relative aspect-video bg-black flex items-center justify-center">
+                  <video
+                    ref={(el) => (videoRefs.current[video.id] = el)}
+                    src={`${video.r2_url}#t=1.5`}
+                    className="w-full h-full object-contain"
+                    muted
+                    playsInline
+                    preload="metadata" // Lädt sofort die Metadaten für das Vorschaubild
+                    onLoadedData={(e) => {
+                      // Falls der Browser bei 0 stehen bleibt, erzwinge Sekunde 1.5
+                      const v = e.currentTarget;
+                      if (v.currentTime < 1) v.currentTime = 1.5;
+                    }}
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/10 pointer-events-none">
+                    <Play className="w-12 h-12 text-white drop-shadow-md" />
                   </div>
-                  <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-                    <span className={`text-xs px-2 py-1 rounded-full ${video.upload_status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
-                      {video.upload_status}
+                </div>
+                
+                <div className="p-5">
+                  <h3 className="font-bold text-slate-900 mb-4 truncate" title={video.file_name}>{video.file_name}</h3>
+                  <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                    <span className="text-xs text-slate-500">
+                      {(video.file_size / (1024 * 1024)).toFixed(1)} MB
                     </span>
-                    <button onClick={() => deleteVideo(video)} className="text-slate-400 hover:text-red-600 transition"><Trash2 className="w-4 h-4" /></button>
+                    <button 
+                      onClick={() => deleteVideo(video)} 
+                      className="p-2 text-slate-400 hover:text-red-600 transition"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
                   </div>
                 </div>
               </div>

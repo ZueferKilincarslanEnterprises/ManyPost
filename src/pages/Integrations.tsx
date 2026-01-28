@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom'; // Link importieren
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Integration } from '../types';
-import { Plus, Youtube, Instagram, Music, Trash2, AlertCircle, CheckCircle } from 'lucide-react';
+import { Plus, Youtube, Instagram, Music, Trash2, AlertCircle, CheckCircle, BarChart3 } from 'lucide-react';
 import Layout from '../components/Layout';
 
 export default function Integrations() {
@@ -132,7 +133,18 @@ export default function Integrations() {
                   <button onClick={() => disconnectIntegration(integration.id)} className="text-slate-400 hover:text-red-600"><Trash2 className="w-5 h-5" /></button>
                 </div>
                 <h3 className="text-lg font-semibold text-slate-900 mb-1">{integration.channel_name}</h3>
-                <p className="text-sm text-slate-500 mb-3">{integration.channel_id}</p>
+                <p className="text-sm text-slate-500 mb-4">{integration.channel_id}</p>
+                
+                <div className="mb-4">
+                  <Link 
+                    to={`/analytics?integration_id=${integration.id}`}
+                    className="flex items-center justify-center gap-2 w-full py-2 bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-600 border border-slate-200 hover:border-blue-200 rounded-lg transition text-sm font-medium"
+                  >
+                    <BarChart3 className="w-4 h-4" />
+                    Statistiken anzeigen
+                  </Link>
+                </div>
+
                 <div className="flex items-center justify-between pt-3 border-t border-slate-100">
                   <span className="text-xs text-slate-500">Connected {new Date(integration.connected_at).toLocaleDateString()}</span>
                   <span className={`text-xs px-2 py-1 rounded-full ${integration.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
