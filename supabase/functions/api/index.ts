@@ -6,6 +6,13 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 };
 
+async function hashKey(key: string): Promise<string> {
+  const msgUint8 = new TextEncoder().encode(key);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 interface RequestBody {
   action?: string;
   [key: string]: any;
@@ -30,11 +37,12 @@ Deno.serve(async (req: Request) => {
     }
 
     const apiKey = authHeader.replace('Bearer ', '');
+    const apiKeyHash = await hashKey(apiKey);
 
     const { data: apiKeyData, error: apiKeyError } = await supabase
       .from('api_keys')
       .select('user_id, is_active')
-      .eq('key', apiKey)
+      .eq('key_hash', apiKeyHash)
       .maybeSingle();
 
     if (apiKeyError || !apiKeyData || !apiKeyData.is_active) {
@@ -51,7 +59,7 @@ Deno.serve(async (req: Request) => {
     await supabase
       .from('api_keys')
       .update({ last_used_at: new Date().toISOString() })
-      .eq('key', apiKey);
+      .eq('key_hash', apiKeyHash);
 
     const url = new URL(req.url);
     const path = url.pathname.split('/').pop();

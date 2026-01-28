@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.57.4';
+import { S3Client, GetObjectCommand } from "npm:@aws-sdk/client-s3@3.616.0";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -36,17 +37,42 @@ async function refreshAccessToken(refreshToken: string, clientId: string, client
   return data.access_token;
 }
 
+async function downloadFromR2(r2Key: string): Promise<Blob> {
+  const R2_ACCOUNT_ID = Deno.env.get('R2_ACCOUNT_ID')!;
+  const R2_ACCESS_KEY_ID = Deno.env.get('R2_ACCESS_KEY_ID')!;
+  const R2_SECRET_ACCESS_KEY = Deno.env.get('R2_SECRET_ACCESS_KEY')!;
+  const R2_BUCKET_NAME = Deno.env.get('R2_BUCKET_NAME')!;
+
+  const s3Client = new S3Client({
+    region: 'auto',
+    endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: R2_ACCESS_KEY_ID,
+      secretAccessKey: R2_SECRET_ACCESS_KEY,
+    },
+  });
+
+  const command = new GetObjectCommand({
+    Bucket: R2_BUCKET_NAME,
+    Key: r2Key,
+  });
+
+  const response = await s3Client.send(command);
+  if (!response.Body) throw new Error("Empty response body from R2");
+
+  // Wir wandeln den Stream in ein Blob um, das YouTube API verarbeiten kann
+  const bytes = await response.Body.transformToByteArray();
+  return new Blob([bytes]);
+}
+
 async function uploadToYouTube(
   accessToken: string,
-  videoUrl: string,
+  r2Key: string,
   metadata: VideoMetadata
 ): Promise<{ videoId: string; videoUrl: string }> {
-  console.log("[youtube-publisher] Fetching video from R2...");
-  const videoResponse = await fetch(videoUrl);
-  if (!videoResponse.ok) throw new Error("Could not download video from R2");
-  
-  const videoBlob = await videoResponse.blob();
-  console.log(`[youtube-publisher] Video size: ${videoBlob.size} bytes`);
+  console.log(`[youtube-publisher] Downloading video from R2 with key: ${r2Key}...`);
+  const videoBlob = await downloadFromR2(r2Key);
+  console.log(`[youtube-publisher] Video downloaded. Size: ${videoBlob.size} bytes`);
 
   const uploadUrl = 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status';
 
@@ -83,7 +109,7 @@ async function uploadToYouTube(
     throw new Error('Failed to get upload location');
   }
 
-  console.log("[youtube-publisher] Uploading video data...");
+  console.log("[youtube-publisher] Uploading video data to YouTube...");
   const uploadResponse = await fetch(uploadLocation, {
     method: 'PUT',
     headers: {
@@ -141,6 +167,10 @@ Deno.serve(async (req: Request) => {
       throw new Error('Scheduled post not found');
     }
 
+    if (!post.video?.r2_key) {
+      throw new Error('Video R2 key not found in database');
+    }
+
     // Set status to processing
     await supabase
       .from('scheduled_posts')
@@ -154,7 +184,7 @@ Deno.serve(async (req: Request) => {
 
     // Refresh token if needed
     const tokenExpiry = post.integration.token_expires_at ? new Date(post.integration.token_expires_at) : new Date(0);
-    if (tokenExpiry < new Date()) {
+    if (tokenExpiry < new Date(Date.now() + 60000)) { // Refresh falls weniger als 1 Minute übrig
       console.log("[youtube-publisher] Refreshing access token...");
       accessToken = await refreshAccessToken(
         post.integration.refresh_token,
@@ -171,7 +201,7 @@ Deno.serve(async (req: Request) => {
         .eq('id', post.integration.id);
     }
 
-    const result = await uploadToYouTube(accessToken, post.video.r2_url, {
+    const result = await uploadToYouTube(accessToken, post.video.r2_key, {
       title: post.title,
       description: post.description,
       tags: post.tags,
@@ -186,7 +216,7 @@ Deno.serve(async (req: Request) => {
     await supabase
       .from('scheduled_posts')
       .update({ status: 'posted' })
-      .eq('id', scheduled_post_id);
+      .eq('id', scheduledPostId);
 
     await supabase
       .from('post_history')
@@ -214,7 +244,7 @@ Deno.serve(async (req: Request) => {
       }
     );
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('[youtube-publisher] Error:', error);
 
     if (scheduledPostId) {

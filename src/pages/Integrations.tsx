@@ -6,7 +6,7 @@ import { Plus, Youtube, Instagram, Music, Trash2, AlertCircle, CheckCircle } fro
 import Layout from '../components/Layout';
 
 export default function Integrations() {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -56,13 +56,17 @@ export default function Integrations() {
   };
 
   const connectYouTube = async () => {
-    if (!user) return;
+    if (!user || !session) return;
     try {
-      // Wir schicken die URL unserer eigenen Callback-Seite mit
       const callbackUrl = `${window.location.origin}/youtube-oauth`;
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/youtube-oauth?action=init&user_id=${user.id}&redirect_uri=${encodeURIComponent(callbackUrl)}`,
-        { method: 'GET' }
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/youtube-oauth?action=init&redirect_uri=${encodeURIComponent(callbackUrl)}`,
+        { 
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`
+          }
+        }
       );
 
       const data = await response.json();
