@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Video as VideoType } from '../types';
-import { Upload, Trash2, AlertCircle, Play, Loader2, Video as VideoIcon } from 'lucide-react';
+import { Upload, Trash2, Play, Loader2, Video as VideoIcon } from 'lucide-react';
 import Layout from '../components/Layout';
 
 export default function Videos() {
@@ -43,7 +43,6 @@ export default function Videos() {
     setUploadProgress(0);
 
     try {
-      // 1. Signierte URL für das Video anfragen
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-r2-signed-url`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
@@ -53,7 +52,6 @@ export default function Videos() {
       const signData = await response.json();
       if (signData.error) throw new Error(signData.error);
 
-      // 2. Video hochladen (Nur eine Datei!)
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', signData.signedUrl, true);
       xhr.setRequestHeader('Content-Type', file.type);
@@ -74,7 +72,6 @@ export default function Videos() {
 
       const videoUrl = signData.signedUrl.split('?')[0];
 
-      // 3. In Datenbank speichern (thumbnail_url zeigt auf das Video mit Zeitstempel)
       const { error: dbError } = await supabase
         .from('videos')
         .insert({
@@ -84,7 +81,7 @@ export default function Videos() {
           mime_type: file.type,
           r2_url: videoUrl,
           r2_key: signData.r2Key,
-          thumbnail_url: `${videoUrl}#t=1.5`, // Trick: Zeige Sekunde 1.5 als Vorschaubild
+          thumbnail_url: `${videoUrl}#t=1.5`, 
           upload_status: 'completed',
           uploaded_at: new Date().toISOString(),
         });
@@ -93,7 +90,7 @@ export default function Videos() {
       loadVideos();
     } catch (error: any) {
       console.error('Upload error:', error);
-      alert('Upload fehlgeschlagen: ' + error.message);
+      alert('Upload fehlgeschlagen');
     } finally {
       setUploading(false);
     }
@@ -122,7 +119,7 @@ export default function Videos() {
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold text-slate-900 mb-2">Videos</h1>
-            <p className="text-slate-600">Verwalte deine Bibliothek (Direkt-Streaming von Cloudflare)</p>
+            <p className="text-slate-600">Deine Cloudflare-Bibliothek (optimierte Vorschau)</p>
           </div>
           <label className={`flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition cursor-pointer ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
             {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Upload className="w-5 h-5" />}
@@ -137,11 +134,9 @@ export default function Videos() {
           </div>
         ) : videos.length === 0 ? (
           <div className="bg-white rounded-2xl border-2 border-dashed border-slate-200 p-12 text-center">
-            <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
-              <VideoIcon className="w-10 h-10 text-slate-300" />
-            </div>
-            <h3 className="text-xl font-bold text-slate-900 mb-2">Keine Videos gefunden</h3>
-            <p className="text-slate-600">Lade dein erstes Video direkt zu Cloudflare hoch.</p>
+            <VideoIcon className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Keine Videos</h3>
+            <p className="text-slate-600">Lade ein Video hoch, um die Vorschau zu testen.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -149,7 +144,10 @@ export default function Videos() {
               <div 
                 key={video.id} 
                 className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden group hover:shadow-md transition"
-                onMouseEnter={() => videoRefs.current[video.id]?.play()}
+                onMouseEnter={() => {
+                  const v = videoRefs.current[video.id];
+                  if (v) v.play().catch(() => {});
+                }}
                 onMouseLeave={() => {
                   const v = videoRefs.current[video.id];
                   if (v) {
@@ -158,22 +156,27 @@ export default function Videos() {
                   }
                 }}
               >
-                <div className="relative aspect-video bg-black">
+                <div className="relative aspect-video bg-black flex items-center justify-center">
                   <video
                     ref={(el) => (videoRefs.current[video.id] = el)}
                     src={`${video.r2_url}#t=1.5`}
                     className="w-full h-full object-contain"
                     muted
                     playsInline
-                    preload="metadata"
+                    preload="metadata" // Lädt sofort die Metadaten für das Vorschaubild
+                    onLoadedData={(e) => {
+                      // Falls der Browser bei 0 stehen bleibt, erzwinge Sekunde 1.5
+                      const v = e.currentTarget;
+                      if (v.currentTime < 1) v.currentTime = 1.5;
+                    }}
                   />
-                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20 pointer-events-none">
-                    <Play className="w-12 h-12 text-white" />
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/10 pointer-events-none">
+                    <Play className="w-12 h-12 text-white drop-shadow-md" />
                   </div>
                 </div>
                 
                 <div className="p-5">
-                  <h3 className="font-bold text-slate-900 mb-4 truncate">{video.file_name}</h3>
+                  <h3 className="font-bold text-slate-900 mb-4 truncate" title={video.file_name}>{video.file_name}</h3>
                   <div className="flex items-center justify-between pt-4 border-t border-slate-100">
                     <span className="text-xs text-slate-500">
                       {(video.file_size / (1024 * 1024)).toFixed(1)} MB
