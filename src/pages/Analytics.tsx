@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams, Link } from 'react-router-dom'; // URL Params nutzen
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { BarChart3, TrendingUp, Users, MessageSquare, ThumbsUp, RefreshCw } from 'lucide-react';
+import { BarChart3, TrendingUp, Users, ThumbsUp, RefreshCw, ChevronLeft } from 'lucide-react';
 import Layout from '../components/Layout';
 
 interface VideoStatSummary {
@@ -16,26 +17,43 @@ interface VideoStatSummary {
 
 export default function Analytics() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [stats, setStats] = useState<VideoStatSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [integrationName, setIntegrationName] = useState<string | null>(null);
+
+  const integrationId = searchParams.get('integration_id');
 
   useEffect(() => {
     loadAnalytics();
-  }, [user]);
+    if (integrationId) {
+      loadIntegrationInfo();
+    } else {
+      setIntegrationName(null);
+    }
+  }, [user, integrationId]);
+
+  const loadIntegrationInfo = async () => {
+    const { data } = await supabase
+      .from('integrations')
+      .select('channel_name')
+      .eq('id', integrationId)
+      .single();
+    if (data) setIntegrationName(data.channel_name);
+  };
 
   const loadAnalytics = async () => {
     if (!user) return;
     setLoading(true);
     try {
-      // Wir holen die aktuellsten Stats für jedes Video
-      // In einer echten App würde man hier eine komplexere Query machen, um auch Trends zu sehen
-      const { data, error } = await supabase
+      let query = supabase
         .from('post_history')
         .select(`
           id,
           title,
           platform_post_id,
+          integration_id,
           video_stats (
             view_count,
             like_count,
@@ -46,10 +64,16 @@ export default function Analytics() {
         .eq('user_id', user.id)
         .eq('status', 'success');
 
+      // Filter nach Kanal anwenden, falls ID vorhanden
+      if (integrationId) {
+        query = query.eq('integration_id', integrationId);
+      }
+
+      const { data, error } = await query;
+
       if (error) throw error;
 
       const formattedStats = (data || []).map(post => {
-        // Holen des neuesten Eintrags aus dem Array video_stats
         const latest = post.video_stats && Array.isArray(post.video_stats) 
           ? [...post.video_stats].sort((a, b) => new Date(b.captured_at).getTime() - new Date(a.captured_at).getTime())[0]
           : null;
@@ -95,17 +119,40 @@ export default function Analytics() {
       <div className="p-8">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900 mb-2">Analysen</h1>
-            <p className="text-slate-600">Performance deiner veröffentlichten Videos</p>
+            <div className="flex items-center gap-2 mb-2 text-blue-600">
+              {integrationId && (
+                <Link to="/integrations" className="hover:underline flex items-center gap-1 text-sm font-medium">
+                  <ChevronLeft className="w-4 h-4" /> Zurück zu Kanälen
+                </Link>
+              )}
+            </div>
+            <h1 className="text-3xl font-bold text-slate-900 mb-2">
+              {integrationName ? `Analysen: ${integrationName}` : 'Gesamt-Analysen'}
+            </h1>
+            <p className="text-slate-600">
+              {integrationName 
+                ? `Performance-Daten für deinen Kanal ${integrationName}` 
+                : 'Performance deiner veröffentlichten Videos über alle Kanäle'}
+            </p>
           </div>
-          <button
-            onClick={triggerSync}
-            disabled={syncing}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition disabled:opacity-50"
-          >
-            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-            {syncing ? 'Synchronisiere...' : 'Jetzt aktualisieren'}
-          </button>
+          <div className="flex gap-3">
+            {integrationId && (
+              <Link 
+                to="/analytics" 
+                className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition text-sm font-medium"
+              >
+                Alle Kanäle zeigen
+              </Link>
+            )}
+            <button
+              onClick={triggerSync}
+              disabled={syncing}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition disabled:opacity-50"
+            >
+              <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+              {syncing ? 'Synchronisiere...' : 'Jetzt aktualisieren'}
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -181,7 +228,7 @@ export default function Analytics() {
                 {stats.length === 0 && !loading && (
                   <tr>
                     <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
-                      Noch keine Statistiken verfügbar.
+                      Keine Statistiken für diesen Filter verfügbar.
                     </td>
                   </tr>
                 )}
