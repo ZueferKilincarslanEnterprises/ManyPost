@@ -12,9 +12,12 @@ You can find your API key in the Dashboard after signing up.
 
 ## Base URL
 
+Die API ist nun direkt über deine Domain erreichbar (Proxy-Weiterleitung via Cloudflare):
+
 ```
-https://bskuwtrrykvnptfivlrl.supabase.co/functions/v1
+/api/v1
 ```
+*(Im Produktionseinsatz: `https://deine-domain.com/api/v1`)*
 
 ## Endpoints
 
@@ -22,7 +25,7 @@ https://bskuwtrrykvnptfivlrl.supabase.co/functions/v1
 
 Get all connected social media accounts.
 
-**Endpoint:** `GET /api/integrations`
+**Endpoint:** `GET /integrations`
 
 **Response:**
 ```json
@@ -44,7 +47,7 @@ Get all connected social media accounts.
 
 Get all uploaded videos.
 
-**Endpoint:** `GET /api/videos`
+**Endpoint:** `GET /videos`
 
 **Response:**
 ```json
@@ -67,7 +70,7 @@ Get all uploaded videos.
 
 Get all pending scheduled posts.
 
-**Endpoint:** `GET /api/scheduled`
+**Endpoint:** `GET /scheduled`
 
 **Response:**
 ```json
@@ -89,7 +92,7 @@ Get all pending scheduled posts.
 
 Create a new scheduled post.
 
-**Endpoint:** `POST /api/schedule`
+**Endpoint:** `POST /schedule`
 
 **Request Body:**
 ```json
@@ -174,7 +177,7 @@ API requests are rate-limited to prevent abuse. If you exceed the rate limit, yo
 ### cURL Example
 
 ```bash
-curl -X POST https://bskuwtrrykvnptfivlrl.supabase.co/functions/v1/api/schedule \
+curl -X POST https://deine-domain.com/api/v1/schedule \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -196,10 +199,10 @@ curl -X POST https://bskuwtrrykvnptfivlrl.supabase.co/functions/v1/api/schedule 
 
 ```javascript
 const apiKey = 'YOUR_API_KEY';
-const baseUrl = 'https://bskuwtrrykvnptfivlrl.supabase.co/functions/v1';
+const baseUrl = '/api/v1'; // Relativ zum Frontend oder absolute Domain
 
 // Schedule a post
-const response = await fetch(`${baseUrl}/api/schedule`, {
+const response = await fetch(`${baseUrl}/schedule`, {
   method: 'POST',
   headers: {
     'Authorization': `Bearer ${apiKey}`,
@@ -222,39 +225,3 @@ const response = await fetch(`${baseUrl}/api/schedule`, {
 
 const data = await response.json();
 console.log(data);
-```
-
-### Python Example
-
-```python
-import requests
-import json
-
-api_key = 'YOUR_API_KEY'
-base_url = 'https://bskuwtrrykvnptfivlrl.supabase.co/functions/v1'
-
-headers = {
-    'Authorization': f'Bearer {api_key}',
-    'Content-Type': 'application/json'
-}
-
-payload = {
-    'integration_id': 'YOUR_INTEGRATION_ID',
-    'video_id': 'YOUR_VIDEO_ID',
-    'scheduled_time': '2024-01-21T15:00:00Z',
-    'title': 'My Awesome Video',
-    'description': 'Check out this video!',
-    'tags': ['tech', 'tutorial'],
-    'category': '28',
-    'privacy_status': 'public',
-    'video_type': 'normal',
-    'made_for_kids': False,
-    'notify_subscribers': True
-}
-
-response = requests.post(f'{base_url}/api/schedule',
-                        headers=headers,
-                        json=payload)
-
-print(response.json())
-```
