@@ -2,11 +2,11 @@ import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Video as VideoType } from '../types';
-import { Upload, Trash2, AlertCircle, Play } from 'lucide-react';
+import { Upload, Trash2, AlertCircle, Play, Loader2 } from 'lucide-react';
 import Layout from '../components/Layout';
 
 export default function Videos() {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [videos, setVideos] = useState<VideoType[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -37,17 +37,26 @@ export default function Videos() {
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !user) return;
+    if (!file || !user || !session) return;
 
     setUploading(true);
     setUploadProgress(0);
 
     try {
-      const { data: signData, error: signError } = await supabase.functions.invoke('generate-r2-signed-url', {
-        body: { fileName: file.name, contentType: file.type }
-      });
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-r2-signed-url`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`
+          },
+          body: JSON.stringify({ fileName: file.name, contentType: file.type })
+        }
+      );
 
-      if (signError || !signData.signedUrl) throw new Error('Failed to get upload URL');
+      const signData = await response.json();
+      if (signData.error || !signData.signedUrl) throw new Error(signData.error || 'Failed to get upload URL');
 
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', signData.signedUrl, true);
@@ -68,6 +77,8 @@ export default function Videos() {
       xhr.send(file);
       await uploadPromise;
 
+      const publicUrl = signData.signedUrl.split('?')[0];
+
       const { error: dbError } = await supabase
         .from('videos')
         .insert({
@@ -75,8 +86,7 @@ export default function Videos() {
           file_name: file.name,
           file_size: file.size,
           mime_type: file.type,
-          r2_url: signData.signedUrl.split('?')[0].replace('https://manypost-videos.bskuwtrrykvnptfivlrl.r2.cloudflarestorage.com/', `https://manypost-videos.bskuwtrrykvnptfivlrl.r2.cloudflarestorage.com/`), 
-          // Note: In a real app, you'd construct the public URL based on your R2 setup
+          r2_url: publicUrl,
           r2_key: signData.r2Key,
           upload_status: 'completed',
           uploaded_at: new Date().toISOString(),
@@ -97,10 +107,18 @@ export default function Videos() {
   const deleteVideo = async (video: VideoType) => {
     if (!confirm('Are you sure you want to delete this video?')) return;
     try {
-      if (video.r2_key) {
-        await supabase.functions.invoke('delete-r2-video', {
-          body: { r2Key: video.r2_key, videoId: video.id }
-        });
+      if (video.r2_key && session) {
+        await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/delete-r2-video`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`
+            },
+            body: JSON.stringify({ r2Key: video.r2_key, videoId: video.id })
+          }
+        );
       }
       const { error } = await supabase.from('videos').delete().eq('id', video.id);
       if (error) throw error;
@@ -117,6 +135,19 @@ export default function Videos() {
     return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
   };
 
+  const handleMouseEnter = (id: string) => {
+    const video = videoRefs.current[id];
+    if (video) video.play().catch(() => {});
+  };
+
+  const handleMouseLeave = (id: string) => {
+    const video = videoRefs.current[id];
+    if (video) {
+      video.pause();
+      video.currentTime = 0.1;
+    }
+  };
+
   return (
     <Layout>
       <div className="p-8">
@@ -126,7 +157,7 @@ export default function Videos() {
             <p className="text-slate-600">Upload and manage your video library</p>
           </div>
           <label className={`flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition cursor-pointer ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
-            <Upload className="w-5 h-5" />
+            {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Upload className="w-5 h-5" />}
             {uploading ? `Uploading ${uploadProgress}%...` : 'Upload Video'}
             <input type="file" accept="video/*" onChange={handleFileSelect} disabled={uploading} className="hidden" />
           </label>
@@ -159,19 +190,25 @@ export default function Videos() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {videos.map((video) => (
-              <div key={video.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="relative aspect-video bg-slate-900 flex items-center justify-center">
+              <div 
+                key={video.id} 
+                className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden group"
+                onMouseEnter={() => handleMouseEnter(video.id)}
+                onMouseLeave={() => handleMouseLeave(video.id)}
+              >
+                <div className="relative aspect-video bg-slate-900 flex items-center justify-center overflow-hidden">
                   {video.r2_url ? (
                     <>
                       <video
                         ref={(el) => (videoRefs.current[video.id] = el)}
-                        src={video.r2_url}
+                        src={`${video.r2_url}#t=0.1`}
                         className="w-full h-full object-cover"
                         muted
+                        playsInline
                         preload="metadata"
                       />
-                      <div className="absolute inset-0 bg-black bg-opacity-30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                        <Play className="w-12 h-12 text-white" />
+                      <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 flex items-center justify-center transition-all">
+                        <Play className="w-12 h-12 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
                     </>
                   ) : (
