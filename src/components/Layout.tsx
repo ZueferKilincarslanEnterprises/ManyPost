@@ -11,6 +11,7 @@ import {
   History,
   FileText,
   LogOut,
+  BarChart3, // Import hinzufügen
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -29,6 +30,7 @@ export default function Layout({ children }: LayoutProps) {
 
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    { path: '/analytics', icon: BarChart3, label: 'Analysen' }, // Analysen hinzufügen
     { path: '/integrations', icon: LinkIcon, label: 'Integrations' },
     { path: '/videos', icon: Upload, label: 'Videos' },
     { path: '/schedule', icon: Calendar, label: 'Schedule' },
@@ -49,7 +51,7 @@ export default function Layout({ children }: LayoutProps) {
           </Link>
         </div>
 
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;

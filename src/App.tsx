@@ -11,6 +11,7 @@ import Schedule from './pages/Schedule';
 import ScheduledPosts from './pages/ScheduledPosts';
 import PostHistory from './pages/PostHistory';
 import Drafts from './pages/Drafts';
+import Analytics from './pages/Analytics'; // Import hinzufügen
 
 function App() {
   return (
@@ -80,6 +81,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Drafts />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/analytics"
+            element={
+              <ProtectedRoute>
+                <Analytics />
               </ProtectedRoute>
             }
           />
