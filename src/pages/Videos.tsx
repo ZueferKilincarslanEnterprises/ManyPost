@@ -2,7 +2,11 @@ import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Video as VideoType } from '../types';
+<<<<<<< HEAD
+import { Upload, Trash2, AlertCircle, FileVideo, CheckCircle } from 'lucide-react';
+=======
 import { Upload, Trash2, AlertCircle, Play } from 'lucide-react';
+>>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
 import Layout from '../components/Layout';
 
 export default function Videos() {
@@ -10,7 +14,11 @@ export default function Videos() {
   const [videos, setVideos] = useState<VideoType[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+<<<<<<< HEAD
+  const [uploadProgress, setUploadProgress] = useState(0);
+=======
   const videoRefs = useRef<{[key: string]: HTMLVideoElement | null}>({});
+>>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
 
   useEffect(() => {
     loadVideos();
@@ -18,7 +26,6 @@ export default function Videos() {
 
   const loadVideos = async () => {
     if (!user) return;
-
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -26,7 +33,6 @@ export default function Videos() {
         .select('*')
         .eq('user_id', user.id)
         .order('uploaded_at', { ascending: false });
-
       if (error) throw error;
       setVideos(data || []);
     } catch (error) {
@@ -58,7 +64,40 @@ export default function Videos() {
     if (!file || !user) return;
 
     setUploading(true);
+    setUploadProgress(0);
+
     try {
+<<<<<<< HEAD
+      // 1. Get signed URL from Edge Function
+      const { data: signData, error: signError } = await supabase.functions.invoke('get-upload-url', {
+        body: { fileName: file.name, fileType: file.type }
+      });
+
+      if (signError || !signData.signedUrl) throw new Error('Failed to get upload URL');
+
+      // 2. Upload file directly to R2
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', signData.signedUrl, true);
+      xhr.setRequestHeader('Content-Type', file.type);
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          setUploadProgress(percent);
+        }
+      };
+
+      const uploadPromise = new Promise((resolve, reject) => {
+        xhr.onload = () => xhr.status === 200 ? resolve(true) : reject(new Error('Upload failed'));
+        xhr.onerror = () => reject(new Error('Network error'));
+      });
+
+      xhr.send(file);
+      await uploadPromise;
+
+      // 3. Register in Database
+      const { error: dbError } = await supabase
+=======
       // 1. Get a signed URL from the Edge Function
       const token = await supabase.auth.getSession().then(({ data }) => data.session?.access_token);
       if (!token) throw new Error('No authentication token');
@@ -105,31 +144,49 @@ export default function Videos() {
 
       // 3. Insert metadata into Supabase, including R2 details
       const { data, error } = await supabase
+>>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
         .from('videos')
         .insert({
           user_id: user.id,
           file_name: file.name,
           file_size: file.size,
           mime_type: file.type,
+<<<<<<< HEAD
+          r2_url: signData.publicUrl,
+          r2_key: signData.key,
+=======
           r2_url: r2PublicUrl, // Store the public URL
           r2_key: r2Key,       // Store the R2 key for future reference/deletion
+>>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
           upload_status: 'completed',
           uploaded_at: new Date().toISOString(),
-        })
-        .select()
-        .single();
+        });
 
-      if (error) throw error;
+      if (dbError) throw dbError;
+      
       loadVideos();
+<<<<<<< HEAD
+    } catch (error: any) {
+      console.error('Error uploading video:', error);
+      alert('Failed to upload video: ' + error.message);
+=======
       alert('Video erfolgreich hochgeladen!');
     } catch (error) {
       console.error('Fehler beim Hochladen des Videos:', error);
       alert(`Fehler beim Hochladen des Videos: ${error instanceof Error ? error.message : 'Unbekannter Fehler'}`);
+>>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
     } finally {
       setUploading(false);
+      setUploadProgress(0);
     }
   };
 
+<<<<<<< HEAD
+  const deleteVideo = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this video?')) return;
+    try {
+      const { error } = await supabase.from('videos').delete().eq('id', id);
+=======
   const deleteVideo = async (id: string, r2Key: string) => {
     if (!confirm('Are you sure you want to delete this video? This action cannot be undone.')) {
       return;
@@ -168,12 +225,16 @@ export default function Videos() {
         .delete()
         .eq('id', id);
 
+>>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
       if (error) throw error;
       loadVideos();
       alert('Video erfolgreich gelöscht!');
     } catch (error) {
       console.error('Error deleting video:', error);
+<<<<<<< HEAD
+=======
       alert(`Fehler beim Löschen des Videos: ${error instanceof Error ? error.message : 'Unbekannter Fehler'}`);
+>>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
     }
   };
 
@@ -199,18 +260,24 @@ export default function Videos() {
             <h1 className="text-3xl font-bold text-slate-900 mb-2">Videos</h1>
             <p className="text-slate-600">Upload and manage your video library</p>
           </div>
-          <label className="flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition cursor-pointer">
+          <label className={`flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition cursor-pointer ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
             <Upload className="w-5 h-5" />
-            {uploading ? 'Uploading...' : 'Upload Video'}
-            <input
-              type="file"
-              accept="video/*"
-              onChange={handleFileSelect}
-              disabled={uploading}
-              className="hidden"
-            />
+            {uploading ? `Uploading ${uploadProgress}%...` : 'Upload Video'}
+            <input type="file" accept="video/*" onChange={handleFileSelect} disabled={uploading} className="hidden" />
           </label>
         </div>
+
+        {uploading && (
+          <div className="mb-8 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-blue-700">Uploading file...</span>
+              <span className="text-sm font-bold text-blue-700">{uploadProgress}%</span>
+            </div>
+            <div className="w-full bg-blue-200 rounded-full h-2">
+              <div className="bg-blue-600 h-2 rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+            </div>
+          </div>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center py-12">
@@ -226,13 +293,7 @@ export default function Videos() {
             <label className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition cursor-pointer">
               <Upload className="w-5 h-5" />
               Upload Video
-              <input
-                type="file"
-                accept="video/*"
-                onChange={handleFileSelect}
-                disabled={uploading}
-                className="hidden"
-              />
+              <input type="file" accept="video/*" onChange={handleFileSelect} disabled={uploading} className="hidden" />
             </label>
           </div>
         ) : (
@@ -259,32 +320,30 @@ export default function Videos() {
                     </div>
                   )}
                 </div>
-
                 <div className="p-4">
-                  <h3 className="font-semibold text-slate-900 mb-2 truncate" title={video.file_name}>
-                    {video.file_name}
-                  </h3>
-
+                  <h3 className="font-semibold text-slate-900 mb-2 truncate" title={video.file_name}>{video.file_name}</h3>
                   <div className="space-y-1 text-sm text-slate-600 mb-4">
                     <div>Size: {formatFileSize(video.file_size)}</div>
+<<<<<<< HEAD
+=======
                     {video.duration && <div>Duration: {formatDuration(video.duration)}</div>}
+>>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
                     <div>Uploaded: {new Date(video.uploaded_at).toLocaleDateString()}</div>
                   </div>
-
                   <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-                    <span className={`text-xs px-2 py-1 rounded-full ${
-                      video.upload_status === 'completed' ? 'bg-green-100 text-green-700' :
-                      video.upload_status === 'uploading' ? 'bg-blue-100 text-blue-700' :
-                      'bg-red-100 text-red-700'
-                    }`}>
+                    <span className={`text-xs px-2 py-1 rounded-full ${video.upload_status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                       {video.upload_status}
                     </span>
+<<<<<<< HEAD
+                    <button onClick={() => deleteVideo(video.id)} className="text-slate-400 hover:text-red-600 transition"><Trash2 className="w-4 h-4" /></button>
+=======
                     <button
                       onClick={() => deleteVideo(video.id, video.r2_key || '')}
                       className="text-slate-400 hover:text-red-600 transition"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
+>>>>>>> 65504e1a1a9b7404a74d4860322ffeb58ab56886
                   </div>
                 </div>
               </div>
