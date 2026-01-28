@@ -5,7 +5,7 @@ import { AlertCircle, CheckCircle } from 'lucide-react';
 
 export default function OAuthCallback() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [searchParams] = useSearchParams();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [message, setMessage] = useState('');
@@ -19,7 +19,7 @@ export default function OAuthCallback() {
       const state = searchParams.get('state');
       const error = searchParams.get('error');
 
-      if (!user || !code) return;
+      if (!user || !session || !code) return;
 
       processing.current = true;
 
@@ -41,7 +41,10 @@ export default function OAuthCallback() {
         const response = await fetch(
           `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/youtube-oauth?action=callback&code=${code}&state=${state}&redirect_uri=${encodeURIComponent(currentCallbackUrl)}`,
           {
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`
+            },
           }
         );
 
@@ -61,10 +64,10 @@ export default function OAuthCallback() {
       }
     };
 
-    if (user && searchParams.get('code')) {
+    if (user && session && searchParams.get('code')) {
       handleCallback();
     }
-  }, [user, searchParams, navigate]);
+  }, [user, session, searchParams, navigate]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">

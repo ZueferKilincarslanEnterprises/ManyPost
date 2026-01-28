@@ -23,6 +23,26 @@ Deno.serve(async (req: Request) => {
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    // Get user from Authorization header
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: 'Missing Authorization header' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     const url = new URL(req.url);
     const action = url.searchParams.get('action');
     const code = url.searchParams.get('code');
@@ -30,7 +50,15 @@ Deno.serve(async (req: Request) => {
     const frontendRedirectUri = url.searchParams.get('redirect_uri');
 
     // 1. CALLBACK / TOKEN EXCHANGE
-    if (code && state) {
+    if (action === 'callback' && code && state) {
+      // Verify that the state (which we set as user_id in init) matches the authenticated user
+      if (state !== user.id) {
+        return new Response(JSON.stringify({ error: 'State mismatch / Security breach attempt' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       const usedRedirectUri = frontendRedirectUri || `${supabaseUrl}/functions/v1/youtube-oauth`;
       
       const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
@@ -69,7 +97,7 @@ Deno.serve(async (req: Request) => {
       const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
       
       const { error: dbError } = await supabase.from('integrations').upsert({
-        user_id: state,
+        user_id: user.id, // Use authenticated user ID instead of query param state
         platform: 'youtube',
         platform_user_id: channel.id,
         channel_name: channel.snippet.title,
@@ -96,11 +124,10 @@ Deno.serve(async (req: Request) => {
 
     // 2. INIT
     if (action === 'init') {
-      const userId = url.searchParams.get('user_id');
       const redirectUri = url.searchParams.get('redirect_uri');
       
-      if (!userId || !redirectUri) {
-        throw new Error('Missing user_id or redirect_uri parameters');
+      if (!redirectUri) {
+        throw new Error('Missing redirect_uri parameter');
       }
 
       const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
@@ -110,15 +137,16 @@ Deno.serve(async (req: Request) => {
         `scope=${encodeURIComponent('https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube')}&` +
         `access_type=offline&` +
         `prompt=consent&` +
-        `state=${userId}`;
+        `state=${user.id}`; // State is bound to the authenticated user ID
 
       return new Response(JSON.stringify({ authUrl }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    throw new Error('Invalid request action');
+    throw new Error('Invalid request action or parameters');
   } catch (error: any) {
+    console.error("[youtube-oauth] Error:", error.message);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500, 
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
