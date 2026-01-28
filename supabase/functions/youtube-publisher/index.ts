@@ -73,7 +73,6 @@ async function uploadToYouTube(
   console.log(`[youtube-publisher] Downloading video from R2...`);
   const videoBlob = await downloadFromR2(r2Key);
 
-  // If it's a short, ensure #Shorts is in the title (YouTube best practice)
   let title = metadata.title;
   if (metadata.videoType === 'short' && !title.toLowerCase().includes('#shorts')) {
     title = title.length > 92 ? title.substring(0, 92) + ' #Shorts' : title + ' #Shorts';
@@ -132,27 +131,60 @@ Deno.serve(async (req: Request) => {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
 
-  let scheduledPostId = null;
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+  let scheduledPostId = null;
 
   try {
+    // Authentication Check
+    const authHeader = req.headers.get('Authorization');
+    const token = authHeader?.replace('Bearer ', '');
+    
+    if (!token) {
+      return new Response(JSON.stringify({ error: 'Missing authorization' }), { status: 401, headers: corsHeaders });
+    }
+
+    let user = null;
+    const isServiceRole = token === supabaseServiceKey;
+
+    if (!isServiceRole) {
+      // If not service role, it must be a valid user token
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser(token);
+      if (authError || !authUser) {
+        console.error('[youtube-publisher] Auth error:', authError?.message);
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
+      }
+      user = authUser;
+    }
+
     const body = await req.json();
     scheduledPostId = body.scheduled_post_id;
     if (!scheduledPostId) throw new Error('Missing scheduled_post_id');
 
-    console.log(`[youtube-publisher] Processing post ID: ${scheduledPostId}`);
+    console.log(`[youtube-publisher] Processing post ID: ${scheduledPostId} (Authorized as: ${isServiceRole ? 'Service Role' : user?.id})`);
 
-    const { data: post, error: postError } = await supabase
+    // Fetch post and verify ownership if not service role
+    let query = supabase
       .from('scheduled_posts')
       .select(`*, integration:integrations(*), video:videos(*)`)
-      .eq('id', scheduledPostId)
-      .maybeSingle();
+      .eq('id', scheduledPostId);
 
-    if (postError || !post) throw new Error('Scheduled post not found');
+    if (!isServiceRole && user) {
+      query = query.eq('user_id', user.id);
+    }
+
+    const { data: post, error: postError } = await query.maybeSingle();
+
+    if (postError || !post) {
+      console.error('[youtube-publisher] Post not found or access denied');
+      throw new Error('Scheduled post not found or access denied');
+    }
+    
     if (!post.video?.r2_key) throw new Error('Video R2 key not found');
 
+    // Update status to processing
     await supabase.from('scheduled_posts').update({ status: 'processing' }).eq('id', scheduledPostId);
 
     const clientId = Deno.env.get('YOUTUBE_CLIENT_ID')!;
@@ -205,7 +237,6 @@ Deno.serve(async (req: Request) => {
     console.error('[youtube-publisher] Error:', error);
     if (scheduledPostId) {
       await supabase.from('scheduled_posts').update({ status: 'failed' }).eq('id', scheduledPostId);
-      // History record for failure...
     }
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
