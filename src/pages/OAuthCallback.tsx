@@ -14,11 +14,7 @@ export default function OAuthCallback() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        if (!user) {
-          setStatus('error');
-          setMessage('Not authenticated');
-          return;
-        }
+        if (!user) return;
 
         const code = searchParams.get('code');
         const state = searchParams.get('state');
@@ -32,39 +28,27 @@ export default function OAuthCallback() {
 
         if (!code || state !== user.id) {
           setStatus('error');
-          setMessage('Invalid callback');
+          setMessage('Invalid callback session');
           return;
         }
 
-        const token = await supabase.auth.getSession().then(({ data }) => data.session?.access_token);
-        if (!token) throw new Error('No authentication token');
+        // Wir müssen die EXAKT GLEICHE redirect_uri senden wie beim Login
+        const currentCallbackUrl = `${window.location.origin}/youtube-oauth`;
 
         const response = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/youtube-oauth?action=callback&code=${code}&state=${state}`,
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/youtube-oauth?action=callback&code=${code}&state=${state}&redirect_uri=${encodeURIComponent(currentCallbackUrl)}`,
           {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
           }
         );
 
         const result = await response.json();
-
-        if (!response.ok || result.error) {
-          setStatus('error');
-          setMessage(result.error || 'Failed to connect');
-          return;
-        }
+        if (!response.ok || result.error) throw new Error(result.error || 'Connection failed');
 
         setStatus('success');
         setMessage(`Connected to ${result.channel.name}`);
-
-        setTimeout(() => {
-          navigate('/integrations');
-        }, 2000);
+        setTimeout(() => navigate('/integrations'), 2000);
       } catch (err: any) {
-        console.error('Callback error:', err);
         setStatus('error');
         setMessage(err.message || 'Failed to process callback');
       }
@@ -74,44 +58,17 @@ export default function OAuthCallback() {
   }, [user, searchParams, navigate]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
-      <div className="max-w-md w-full">
-        <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
-          {status === 'loading' && (
-            <>
-              <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-              <h2 className="text-xl font-semibold text-slate-900 mb-2">Connecting YouTube</h2>
-              <p className="text-slate-600">Please wait...</p>
-            </>
-          )}
-
-          {status === 'success' && (
-            <>
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <CheckCircle className="w-8 h-8 text-green-600" />
-              </div>
-              <h2 className="text-xl font-semibold text-slate-900 mb-2">Success!</h2>
-              <p className="text-slate-600">{message}</p>
-              <p className="text-sm text-slate-500 mt-4">Redirecting...</p>
-            </>
-          )}
-
-          {status === 'error' && (
-            <>
-              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <AlertCircle className="w-8 h-8 text-red-600" />
-              </div>
-              <h2 className="text-xl font-semibold text-slate-900 mb-2">Connection Failed</h2>
-              <p className="text-red-600 mb-6">{message}</p>
-              <button
-                onClick={() => navigate('/integrations')}
-                className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition"
-              >
-                Back to Integrations
-              </button>
-            </>
-          )}
-        </div>
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
+        {status === 'loading' && (
+          <><div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div><p>Connecting YouTube...</p></>
+        )}
+        {status === 'success' && (
+          <><CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-4" /><h2 className="text-xl font-bold">Success!</h2><p>{message}</p></>
+        )}
+        {status === 'error' && (
+          <><AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" /><h2 className="text-xl font-bold">Failed</h2><p className="text-red-600">{message}</p><button onClick={() => navigate('/integrations')} className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg">Back</button></>
+        )}
       </div>
     </div>
   );
