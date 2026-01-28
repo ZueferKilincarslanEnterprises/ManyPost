@@ -14,53 +14,48 @@ Deno.serve(async (req: Request) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
+    const clientSecret = Deno.env.get('YOUTUBE_CLIENT_SECRET');
 
+    if (!clientId || !clientSecret) {
+      console.error("[youtube-oauth] Missing YOUTUBE_CLIENT_ID or YOUTUBE_CLIENT_SECRET");
+      throw new Error("Server config error: Missing YouTube credentials");
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
     const url = new URL(req.url);
     const action = url.searchParams.get('action');
     const code = url.searchParams.get('code');
     const state = url.searchParams.get('state');
+    const frontendRedirectUri = url.searchParams.get('redirect_uri');
 
-    // Ermittle die Frontend URL aus Secrets oder Fallback
-    const envUrl = Deno.env.get('FRONTEND_URL');
-    const frontendUrl = (envUrl && envUrl !== 'undefined') ? envUrl.replace(/\/$/, '') : 'http://localhost:5173';
-
-    // 1. CALLBACK HANDLING (Von Google oder vom Frontend)
+    // 1. CALLBACK / TOKEN EXCHANGE
     if (code && state) {
-      console.log(`[youtube-oauth] Processing callback for user: ${state}`);
+      const usedRedirectUri = frontendRedirectUri || `${supabaseUrl}/functions/v1/youtube-oauth`;
       
-      const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
-      const clientSecret = Deno.env.get('YOUTUBE_CLIENT_SECRET');
-      const redirectUri = `${supabaseUrl}/functions/v1/youtube-oauth`;
-
       const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           code,
-          client_id: clientId!,
-          client_secret: clientSecret!,
-          redirect_uri: redirectUri,
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: usedRedirectUri,
           grant_type: 'authorization_code',
         }),
       });
 
       const tokens = await tokenResponse.json();
-
+      
       if (!tokens.access_token) {
-        console.error('[youtube-oauth] Token error:', tokens);
-        if (action === 'callback') { // Aufruf vom Frontend per fetch
-          return new Response(JSON.stringify({ error: tokens.error_description || 'Token exchange failed' }), {
-            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          });
-        }
-        // Direkter Browser-Redirect von Google
-        return new Response(null, {
-          status: 302, headers: { 'Location': `${frontendUrl}/integrations?error=token_failed` }
+        return new Response(JSON.stringify({ 
+          error: tokens.error_description || tokens.error || 'Failed to exchange code'
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
 
-      // Channel Daten abrufen
       const channelResponse = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', {
         headers: { Authorization: `Bearer ${tokens.access_token}` },
       });
@@ -68,19 +63,12 @@ Deno.serve(async (req: Request) => {
       const channel = channelData.items?.[0];
 
       if (!channel) {
-        if (action === 'callback') {
-          return new Response(JSON.stringify({ error: 'No YouTube channel found' }), {
-            status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          });
-        }
-        return new Response(null, {
-          status: 302, headers: { 'Location': `${frontendUrl}/integrations?error=no_channel` }
-        });
+        throw new Error('No YouTube channel found for this account.');
       }
 
-      // In Datenbank speichern
       const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
-      await supabase.from('integrations').upsert({
+      
+      const { error: dbError } = await supabase.from('integrations').upsert({
         user_id: state,
         platform: 'youtube',
         platform_user_id: channel.id,
@@ -91,29 +79,29 @@ Deno.serve(async (req: Request) => {
         refresh_token: tokens.refresh_token,
         token_expires_at: expiresAt,
         is_active: true,
-        last_synced_at: new Date().toISOString(),
-      }, { onConflict: 'user_id,platform_user_id' });
+        connected_at: new Date().toISOString(),
+      }, { 
+        onConflict: 'user_id,platform,platform_user_id' 
+      });
 
-      // Antwort-Logik
-      if (action === 'callback') {
-        return new Response(JSON.stringify({ success: true, channel: { name: channel.snippet.title } }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-      
-      return new Response(null, {
-        status: 302,
-        headers: { 'Location': `${frontendUrl}/integrations?success=youtube&channel=${encodeURIComponent(channel.snippet.title)}` }
+      if (dbError) throw dbError;
+
+      return new Response(JSON.stringify({ 
+        success: true, 
+        channel: { name: channel.snippet.title } 
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    // 2. INIT HANDLING
+    // 2. INIT
     if (action === 'init') {
       const userId = url.searchParams.get('user_id');
-      if (!userId) throw new Error('Missing user_id');
-
-      const clientId = Deno.env.get('YOUTUBE_CLIENT_ID');
-      const redirectUri = `${supabaseUrl}/functions/v1/youtube-oauth`;
+      const redirectUri = url.searchParams.get('redirect_uri');
+      
+      if (!userId || !redirectUri) {
+        throw new Error('Missing user_id or redirect_uri parameters');
+      }
 
       const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
         `client_id=${clientId}&` +
@@ -129,14 +117,11 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    return new Response(JSON.stringify({ error: 'Invalid request' }), {
-      status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
-
-  } catch (error) {
-    console.error('[youtube-oauth] Error:', error);
+    throw new Error('Invalid request action');
+  } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      status: 500, 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
 });

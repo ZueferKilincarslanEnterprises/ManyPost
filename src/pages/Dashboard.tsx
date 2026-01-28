@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { ApiKey, Integration, ScheduledPost } from '../types';
-import { Copy, RefreshCw, Check, Link as LinkIcon, Calendar, History, Plus, Trash2, Eye, EyeOff } from 'lucide-react';
+import { ApiKey } from '../types';
+import { Copy, Check, Link as LinkIcon, Calendar, History, Plus, Trash2, Eye, EyeOff } from 'lucide-react';
 import Layout from '../components/Layout';
 
 export default function Dashboard() {
