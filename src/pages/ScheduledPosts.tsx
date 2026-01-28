@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { ScheduledPost, Integration, Video as VideoType } from '../types';
-import { Clock, X, Play, AlertCircle, Youtube, Loader2 } from 'lucide-react';
+import { Clock, X, Play, AlertCircle, Youtube, Loader2, Edit } from 'lucide-react';
 import Layout from '../components/Layout';
 
 interface ScheduledPostWithDetails extends ScheduledPost {
@@ -50,6 +50,7 @@ export default function ScheduledPosts() {
       loadPosts();
     } catch (error) {
       console.error('Error cancelling post:', error);
+      alert('Failed to cancel post');
     }
   };
 
@@ -75,7 +76,7 @@ export default function ScheduledPosts() {
     } catch (error: any) {
       console.error('Error posting now:', error);
       alert('Failed to publish: ' + error.message);
-      loadPosts(); // Refresh to see error status
+      loadPosts();
     } finally {
       setProcessingId(null);
     }
@@ -97,8 +98,8 @@ export default function ScheduledPosts() {
       <div className="p-8">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900 mb-2">Geplante Posts</h1>
-            <p className="text-slate-600">Verwalte deine anstehenden Veröffentlichungen</p>
+            <h1 className="text-3xl font-bold text-slate-900 mb-2">Scheduled Posts</h1>
+            <p className="text-slate-600">Manage your upcoming scheduled posts</p>
           </div>
           <div className="flex gap-2">
             {['all', 'pending', 'processing', 'failed'].map((f) => (
@@ -118,8 +119,8 @@ export default function ScheduledPosts() {
             <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <AlertCircle className="w-8 h-8 text-slate-400" />
             </div>
-            <h3 className="text-lg font-semibold text-slate-900 mb-2">Keine geplanten Posts</h3>
-            <p className="text-slate-600">Du hast aktuell keine Posts in der Warteschlange.</p>
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">No scheduled posts</h3>
+            <p className="text-slate-600">You don't have any posts scheduled yet</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -157,7 +158,19 @@ export default function ScheduledPosts() {
                         {processingId === post.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
                         {processingId === post.id ? 'Publishing...' : 'Post Now'}
                       </button>
-                      <button onClick={() => cancelPost(post.id)} className="flex items-center gap-1 px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition">
+                      <button
+                        onClick={() => editPost(post)}
+                        disabled={post.status === 'processing' || processingId === post.id}
+                        className="flex items-center gap-1 px-3 py-2 text-slate-600 hover:bg-slate-50 rounded-lg transition disabled:opacity-50"
+                      >
+                        <Edit className="w-4 h-4" />
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => cancelPost(post.id)}
+                        disabled={post.status === 'processing' || processingId === post.id}
+                        className="flex items-center gap-1 px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50"
+                      >
                         <X className="w-4 h-4" /> Cancel
                       </button>
                     </div>

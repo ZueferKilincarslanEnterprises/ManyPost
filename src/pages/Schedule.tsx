@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Integration, Video as VideoType, Draft, ScheduledPost } from '../types';
-import { Calendar, AlertCircle, Save } from 'lucide-react';
+import { Calendar, Save } from 'lucide-react';
 import Layout from '../components/Layout';
 
 const YOUTUBE_CATEGORIES = [
@@ -59,7 +59,6 @@ export default function Schedule() {
       const source = draft || scheduledPost;
       if (scheduledPost) setEditingId(scheduledPost.id);
 
-      // Zeit konvertieren für das datetime-local input
       let localTime = '';
       const timeToConvert = scheduledPost ? scheduledPost.scheduled_time : draft?.metadata?.scheduled_time;
       
@@ -137,11 +136,11 @@ export default function Schedule() {
           .update(postData)
           .eq('id', editingId);
         if (error) throw error;
-        alert('Post erfolgreich aktualisiert!');
+        alert('Post successfully updated!');
       } else {
         const { error } = await supabase.from('scheduled_posts').insert(postData);
         if (error) throw error;
-        alert('Post erfolgreich geplant!');
+        alert('Post successfully scheduled!');
       }
 
       if (location.state?.draft?.id) {
@@ -151,7 +150,7 @@ export default function Schedule() {
       navigate('/scheduled');
     } catch (error) {
       console.error('Error scheduling post:', error);
-      alert('Fehler beim Speichern des Posts');
+      alert('Failed to save post');
     } finally {
       setSubmitting(false);
     }
@@ -190,11 +189,11 @@ export default function Schedule() {
         if (error) throw error;
       }
 
-      alert('Entwurf gespeichert!');
+      alert('Draft saved!');
       navigate('/drafts');
     } catch (error) {
       console.error('Error saving draft:', error);
-      alert('Fehler beim Speichern des Entwurfs');
+      alert('Failed to save draft');
     }
   };
 
@@ -213,25 +212,24 @@ export default function Schedule() {
       <div className="p-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-900 mb-2">
-            {editingId ? 'Post bearbeiten' : 'Post planen'}
+            {editingId ? 'Edit Post' : 'Schedule Post'}
           </h1>
           <p className="text-slate-600">
-            {editingId ? 'Ändere die Details deines geplanten Posts' : 'Erstelle einen neuen geplanten Post'}
+            {editingId ? 'Modify the details of your scheduled post' : 'Create a new scheduled post'}
           </p>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 max-w-3xl">
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* ... Gleiches Formular wie zuvor, aber mit dynamischem Button-Text ... */}
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Account auswählen</label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Select Account</label>
               <select
                 required
                 value={formData.integration_id}
                 onChange={(e) => setFormData({ ...formData, integration_id: e.target.value })}
                 className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="">Wähle einen Account...</option>
+                <option value="">Select an account...</option>
                 {integrations.map((integration) => (
                   <option key={integration.id} value={integration.id}>
                     {integration.platform.toUpperCase()} - {integration.channel_name}
@@ -241,14 +239,14 @@ export default function Schedule() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Video auswählen</label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Select Video</label>
               <select
                 required
                 value={formData.video_id}
                 onChange={(e) => setFormData({ ...formData, video_id: e.target.value })}
                 className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="">Wähle ein Video...</option>
+                <option value="">Select a video...</option>
                 {videos.map((video) => (
                   <option key={video.id} value={video.id}>{video.file_name}</option>
                 ))}
@@ -256,7 +254,7 @@ export default function Schedule() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Datum & Uhrzeit</label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Date & Time</label>
               <input
                 type="datetime-local"
                 required
@@ -267,7 +265,7 @@ export default function Schedule() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Titel <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Title <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 required
@@ -275,24 +273,24 @@ export default function Schedule() {
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                 className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Video Titel"
+                placeholder="Video Title"
               />
-              <p className="text-sm text-slate-500 mt-1">{formData.title.length}/100 Zeichen</p>
+              <p className="text-sm text-slate-500 mt-1">{formData.title.length}/100 characters</p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Beschreibung</label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Description</label>
               <textarea
                 rows={4}
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Video Beschreibung"
+                placeholder="Video Description"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Tags (mit Komma getrennt)</label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Tags (comma separated)</label>
               <input
                 type="text"
                 value={formData.tags}
@@ -304,7 +302,7 @@ export default function Schedule() {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Kategorie</label>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Category</label>
                 <select
                   value={formData.category}
                   onChange={(e) => setFormData({ ...formData, category: e.target.value })}
@@ -317,15 +315,15 @@ export default function Schedule() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Sichtbarkeit</label>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Privacy Status</label>
                 <select
                   value={formData.privacy_status}
                   onChange={(e) => setFormData({ ...formData, privacy_status: e.target.value })}
                   className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="public">Öffentlich</option>
-                  <option value="unlisted">Nicht gelistet</option>
-                  <option value="private">Privat</option>
+                  <option value="public">Public</option>
+                  <option value="unlisted">Unlisted</option>
+                  <option value="private">Private</option>
                 </select>
               </div>
             </div>
@@ -337,7 +335,7 @@ export default function Schedule() {
                 className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition disabled:opacity-50"
               >
                 {editingId ? <Save className="w-5 h-5" /> : <Calendar className="w-5 h-5" />}
-                {submitting ? 'Wird gespeichert...' : editingId ? 'Änderungen speichern' : 'Post planen'}
+                {submitting ? 'Saving...' : editingId ? 'Update Post' : 'Schedule Post'}
               </button>
               {!editingId && (
                 <button
@@ -345,7 +343,7 @@ export default function Schedule() {
                   onClick={saveDraft}
                   className="px-6 py-3 border border-slate-300 text-slate-700 font-semibold rounded-lg hover:bg-slate-50 transition"
                 >
-                  Entwurf speichern
+                  Save Draft
                 </button>
               )}
             </div>

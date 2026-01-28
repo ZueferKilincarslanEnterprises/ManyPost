@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Video as VideoType } from '../types';
-import { Upload, Trash2, AlertCircle, FileVideo, CheckCircle } from 'lucide-react';
+import { Upload, Trash2, AlertCircle, Play } from 'lucide-react';
 import Layout from '../components/Layout';
 
 export default function Videos() {
@@ -11,6 +11,7 @@ export default function Videos() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const videoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({});
 
   useEffect(() => {
     loadVideos();
@@ -34,23 +35,6 @@ export default function Videos() {
     }
   };
 
-  const generateThumbnail = (videoId: string) => {
-    const video = videoRefs.current[videoId];
-    if (!video) return;
-
-    // Create canvas to capture frame
-    const canvas = document.createElement('canvas');
-    canvas.width = 320;
-    canvas.height = 180;
-    const ctx = canvas.getContext('2d');
-    
-    if (ctx) {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      return canvas.toDataURL('image/jpeg');
-    }
-    return null;
-  };
-
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user) return;
@@ -59,14 +43,12 @@ export default function Videos() {
     setUploadProgress(0);
 
     try {
-      // 1. Get signed URL from Edge Function
-      const { data: signData, error: signError } = await supabase.functions.invoke('get-upload-url', {
-        body: { fileName: file.name, fileType: file.type }
+      const { data: signData, error: signError } = await supabase.functions.invoke('generate-r2-signed-url', {
+        body: { fileName: file.name, contentType: file.type }
       });
 
       if (signError || !signData.signedUrl) throw new Error('Failed to get upload URL');
 
-      // 2. Upload file directly to R2
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', signData.signedUrl, true);
       xhr.setRequestHeader('Content-Type', file.type);
@@ -86,7 +68,6 @@ export default function Videos() {
       xhr.send(file);
       await uploadPromise;
 
-      // 3. Register in Database
       const { error: dbError } = await supabase
         .from('videos')
         .insert({
@@ -94,8 +75,9 @@ export default function Videos() {
           file_name: file.name,
           file_size: file.size,
           mime_type: file.type,
-          r2_url: signData.publicUrl,
-          r2_key: signData.key,
+          r2_url: signData.signedUrl.split('?')[0].replace('https://manypost-videos.bskuwtrrykvnptfivlrl.r2.cloudflarestorage.com/', `https://manypost-videos.bskuwtrrykvnptfivlrl.r2.cloudflarestorage.com/`), 
+          // Note: In a real app, you'd construct the public URL based on your R2 setup
+          r2_key: signData.r2Key,
           upload_status: 'completed',
           uploaded_at: new Date().toISOString(),
         });
@@ -112,13 +94,17 @@ export default function Videos() {
     }
   };
 
-  const deleteVideo = async (id: string) => {
+  const deleteVideo = async (video: VideoType) => {
     if (!confirm('Are you sure you want to delete this video?')) return;
     try {
-      const { error } = await supabase.from('videos').delete().eq('id', id);
+      if (video.r2_key) {
+        await supabase.functions.invoke('delete-r2-video', {
+          body: { r2Key: video.r2_key, videoId: video.id }
+        });
+      }
+      const { error } = await supabase.from('videos').delete().eq('id', video.id);
       if (error) throw error;
       loadVideos();
-      alert('Video erfolgreich gelöscht!');
     } catch (error) {
       console.error('Error deleting video:', error);
     }
@@ -129,13 +115,6 @@ export default function Videos() {
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
     if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
     return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
-  };
-
-  const formatDuration = (seconds?: number) => {
-    if (!seconds) return '';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -176,11 +155,6 @@ export default function Videos() {
             </div>
             <h3 className="text-lg font-semibold text-slate-900 mb-2">No videos uploaded</h3>
             <p className="text-slate-600 mb-6">Upload your first video to start scheduling posts</p>
-            <label className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition cursor-pointer">
-              <Upload className="w-5 h-5" />
-              Upload Video
-              <input type="file" accept="video/*" onChange={handleFileSelect} disabled={uploading} className="hidden" />
-            </label>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -216,7 +190,7 @@ export default function Videos() {
                     <span className={`text-xs px-2 py-1 rounded-full ${video.upload_status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                       {video.upload_status}
                     </span>
-                    <button onClick={() => deleteVideo(video.id)} className="text-slate-400 hover:text-red-600 transition"><Trash2 className="w-4 h-4" /></button>
+                    <button onClick={() => deleteVideo(video)} className="text-slate-400 hover:text-red-600 transition"><Trash2 className="w-4 h-4" /></button>
                   </div>
                 </div>
               </div>
